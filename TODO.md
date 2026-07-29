@@ -76,10 +76,10 @@
   - 主链路回归：CLI 在无 Docker、无网络环境可启动。
 - 完成后提交：`feat(storage): T-003 add SQLite migrations and local data`
 
-### [ ] T-004 `init`、`doctor` 与运行时配置
+### [x] T-004 `init`、`doctor` 与运行时配置
 
 - 修改目标：实现 Lite 初始化、配置加载和健康诊断。
-- 允许修改的范围：`cmd/interviewcraft/`、`internal/config/`、`internal/doctor/`、相关测试与文档、`TODO.md` 当前任务状态与记录。
+- 允许修改的范围：`cmd/interviewcraft/`、命令分发所需的 `internal/cli/`、`internal/config/`、`internal/doctor/`、相关测试与文档、`TODO.md` 当前任务状态与记录。
 - 不允许破坏的逻辑：默认必须为 SQLite、本地数据目录、`RUNNER_MODE=disabled`；可选依赖失败不得阻止 Lite 启动；密钥不得输出。
 - 验收的标准：
   - `interviewcraft init` 可安全重复执行。
@@ -319,3 +319,4 @@
 | R-001 | T-001 | 初始化 Git 与 Go CLI 单二进制骨架 | `.gitignore`、`go.mod`、`README.md`、`cmd/interviewcraft/`、`internal/cli/`、`TODO.md`、Git 元数据 | 不改 `docs/`；不实现数据库、TUI、Provider、Runner；不引入 Node/Docker/常驻服务 | `gofmt -l` 无输出；`go vet ./...`、`go test ./...`、单二进制构建通过；主流程 help=0；加载中=N/A（无异步）；空目录/无配置 help=0；未知命令=2；占位命令=1；无 Docker 主链路通过 | `chore(cli): T-001 bootstrap Go command` |
 | R-002 | T-002 | 建立领域契约、异步状态与类型化错误 | `internal/core/`、对应测试、`TODO.md` | 不混淆事实/推断；不放宽必填来源、置信度和证据字段；不实现 Provider/DB/TUI/Runner；不改 `docs/` | 五类 JSON Schema 与严格 Go 校验通过；主流程=合法契约；加载中=Pending→Streaming→Succeeded/Failed；空数据=缺失 facts 等必填字段被拒绝；报错=未知字段、非法枚举、空 evidence、无效状态被拒绝；Schema 失败仅重试 1 次并返回类型化 fallback；`gofmt -l`、`go vet ./...`、`go test -count=1 -cover ./...`、构建及 T-001 CLI 回归通过 | `feat(core): T-002 add domain contracts and async states` |
 | R-003 | T-003 | 建立 SQLite、本地目录、迁移与训练数据持久化 | `internal/db/`、`go.mod/go.sum`、`TODO.md` | 事件只追加；删除事务化；不吞写入错误；不引入 CGO/Docker/外部数据库；不改 `docs/` | 固定并校验 `modernc.org/sqlite v1.55.0`；主流程=首次/重复迁移、完整训练图 CRUD、重启恢复、事件时间序和级联删除通过；加载中=Pending→Streaming→Succeeded/Failed；空数据=新库各查询返回显式空值；报错=无效路径、损坏/改名迁移、重复事件、级联失败回滚和无效 evidence 均返回类型化错误；`gofmt -l`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 ./...`、单二进制构建及 CLI 回归通过；DB 覆盖率 71.5% | `feat(storage): T-003 add SQLite migrations and local data` |
+| R-004 | T-004 | 实现 Lite 初始化、运行时配置和健康诊断 | `internal/cli/`、`internal/config/`、`internal/doctor/`、相关测试、`README.md`、`TODO.md` | 保持 SQLite、本地目录、Runner 默认禁用；Runner 失败不阻塞 Lite；不输出密钥；不实现 TUI/Provider/Runner 业务 | 主流程=`init → doctor` 在无 Docker 下通过且 init 幂等；加载中=Pending→5×Streaming→Succeeded/Failed；为空=无配置时返回非零并提示 init，缺失数据目录不被 doctor 隐式创建；报错=模型不可用/终端过小/SQLite 不可用阻塞，Docker 不可用仅告警；`gofmt -l`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 -cover ./...`、单二进制构建和 help 回归通过；config/doctor/cli 覆盖率 68.9%/76.3%/72.7% | `feat(runtime): T-004 implement init and doctor` |
