@@ -64,10 +64,10 @@
   - 主链路回归：T-001 CLI 测试继续通过。
 - 完成后提交：`feat(core): T-002 add domain contracts and async states`
 
-### [ ] T-003 SQLite 初始化、迁移与本地目录
+### [x] T-003 SQLite 初始化、迁移与本地目录
 
 - 修改目标：实现 SQLite 数据层、迁移和本地数据目录创建，支撑画像、场景、会话、草稿、Coach、代码与报告。
-- 允许修改的范围：`internal/db/`、`internal/adapters/storage/`、迁移文件、对应测试、`TODO.md` 当前任务状态与记录。
+- 允许修改的范围：`internal/db/`、`internal/adapters/storage/`、迁移文件、对应测试、SQLite 纯 Go 驱动所需的 `go.mod/go.sum`、`TODO.md` 当前任务状态与记录。
 - 不允许破坏的逻辑：不得静默吞掉写入错误；密钥只存引用或受保护值；已提交事件必须追加写；删除需要事务边界。
 - 验收的标准：
   - 首次启动可创建数据库及 `uploads/exports/logs` 目录，迁移可重复执行。
@@ -318,3 +318,4 @@
 | R-000 | 规划 | 从两份规范生成严格有序的开发清单 | 仅 `TODO.md` | 不改 `docs/`，不实现业务 | 已覆盖顺序、边界、四态、主链路回归和逐项提交规则 | 待仓库初始化 |
 | R-001 | T-001 | 初始化 Git 与 Go CLI 单二进制骨架 | `.gitignore`、`go.mod`、`README.md`、`cmd/interviewcraft/`、`internal/cli/`、`TODO.md`、Git 元数据 | 不改 `docs/`；不实现数据库、TUI、Provider、Runner；不引入 Node/Docker/常驻服务 | `gofmt -l` 无输出；`go vet ./...`、`go test ./...`、单二进制构建通过；主流程 help=0；加载中=N/A（无异步）；空目录/无配置 help=0；未知命令=2；占位命令=1；无 Docker 主链路通过 | `chore(cli): T-001 bootstrap Go command` |
 | R-002 | T-002 | 建立领域契约、异步状态与类型化错误 | `internal/core/`、对应测试、`TODO.md` | 不混淆事实/推断；不放宽必填来源、置信度和证据字段；不实现 Provider/DB/TUI/Runner；不改 `docs/` | 五类 JSON Schema 与严格 Go 校验通过；主流程=合法契约；加载中=Pending→Streaming→Succeeded/Failed；空数据=缺失 facts 等必填字段被拒绝；报错=未知字段、非法枚举、空 evidence、无效状态被拒绝；Schema 失败仅重试 1 次并返回类型化 fallback；`gofmt -l`、`go vet ./...`、`go test -count=1 -cover ./...`、构建及 T-001 CLI 回归通过 | `feat(core): T-002 add domain contracts and async states` |
+| R-003 | T-003 | 建立 SQLite、本地目录、迁移与训练数据持久化 | `internal/db/`、`go.mod/go.sum`、`TODO.md` | 事件只追加；删除事务化；不吞写入错误；不引入 CGO/Docker/外部数据库；不改 `docs/` | 固定并校验 `modernc.org/sqlite v1.55.0`；主流程=首次/重复迁移、完整训练图 CRUD、重启恢复、事件时间序和级联删除通过；加载中=Pending→Streaming→Succeeded/Failed；空数据=新库各查询返回显式空值；报错=无效路径、损坏/改名迁移、重复事件、级联失败回滚和无效 evidence 均返回类型化错误；`gofmt -l`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 ./...`、单二进制构建及 CLI 回归通过；DB 覆盖率 71.5% | `feat(storage): T-003 add SQLite migrations and local data` |
