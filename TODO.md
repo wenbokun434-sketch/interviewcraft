@@ -101,10 +101,10 @@
   - 主链路回归：CLI 与存储测试继续通过。
 - 完成后提交：`feat(tui): T-005 build design-system primitives`
 
-### [ ] T-006 P-01 训练主页与导航骨架
+### [x] T-006 P-01 训练主页与导航骨架
 
 - 修改目标：实现训练主页、全局导航、最近训练和 Practice Queue 的数据接口。
-- 允许修改的范围：`internal/tui/screens/training/`、必要的查询层、对应测试、`TODO.md` 当前任务状态与记录。
+- 允许修改的范围：`internal/tui/screens/training/`、必要的查询层、`internal/cli/` 的 `run` 最小启动接线、对应测试、`TODO.md` 当前任务状态与记录。
 - 不允许破坏的逻辑：每屏只能有一个主行动；分数必须带维度；继续训练必须恢复最后持久化事件。
 - 验收的标准：
   - 新用户可从空主页进入创建画像；已有会话可继续或查看报告。
@@ -321,3 +321,4 @@
 | R-003 | T-003 | 建立 SQLite、本地目录、迁移与训练数据持久化 | `internal/db/`、`go.mod/go.sum`、`TODO.md` | 事件只追加；删除事务化；不吞写入错误；不引入 CGO/Docker/外部数据库；不改 `docs/` | 固定并校验 `modernc.org/sqlite v1.55.0`；主流程=首次/重复迁移、完整训练图 CRUD、重启恢复、事件时间序和级联删除通过；加载中=Pending→Streaming→Succeeded/Failed；空数据=新库各查询返回显式空值；报错=无效路径、损坏/改名迁移、重复事件、级联失败回滚和无效 evidence 均返回类型化错误；`gofmt -l`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 ./...`、单二进制构建及 CLI 回归通过；DB 覆盖率 71.5% | `feat(storage): T-003 add SQLite migrations and local data` |
 | R-004 | T-004 | 实现 Lite 初始化、运行时配置和健康诊断 | `internal/cli/`、`internal/config/`、`internal/doctor/`、相关测试、`README.md`、`TODO.md` | 保持 SQLite、本地目录、Runner 默认禁用；Runner 失败不阻塞 Lite；不输出密钥；不实现 TUI/Provider/Runner 业务 | 主流程=`init → doctor` 在无 Docker 下通过且 init 幂等；加载中=Pending→5×Streaming→Succeeded/Failed；为空=无配置时返回非零并提示 init，缺失数据目录不被 doctor 隐式创建；报错=模型不可用/终端过小/SQLite 不可用阻塞，Docker 不可用仅告警；`gofmt -l`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 -cover ./...`、单二进制构建和 help 回归通过；config/doctor/cli 覆盖率 68.9%/76.3%/72.7% | `feat(runtime): T-004 implement init and doctor` |
 | R-005 | T-005 | 建立语义主题、基础组件、焦点模型与响应式 AppShell | `internal/tui/theme/`、`internal/tui/components/`、`internal/tui/layout/`、组件/快照测试、`TODO.md` | 不使用功能局部原始颜色；Pane 深度不超过两层；不依赖颜色或鼠标；不假设 Unicode 固定宽度；不提前实现业务 Screen | 11 个 DESIGN 核心组件齐备；`auto/dark/light`、true-color/ANSI-16/no-color、ASCII、reduce-motion 可切换；主流程=键盘焦点循环、overlay 精确恢复草稿焦点；加载中=Progress 与 Pending/Streaming/Succeeded/Failed Activity；为空=SelectableList/TextComposer 提供行动；报错=类型化安全信息与尺寸阻塞态；160×48、120×36、80×24、72×22 快照及 CJK、长路径、长模型名、ASCII overlay 通过；`gofmt -l`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 -cover ./...`、单二进制构建和 CLI/存储回归通过；components/layout/theme 覆盖率 80.8%/68.2%/70.1% | `feat(tui): T-005 build design-system primitives` |
+| R-006 | T-006 | 实现 P-01 训练主页、全局导航、最近训练与 Practice Queue | `internal/tui/screens/training/`、必要查询层、`internal/cli/` 的 `run` 最小启动接线、对应测试、`TODO.md` | 单屏一个主行动；分数必须带维度；继续训练恢复最后持久化事件；不改 `docs/`；不提前实现 Profile/Report/Provider 业务 | 主流程=继续精确恢复最后持久化事件与独立草稿、新建进入画像、最近报告与 Practice Queue 跳转；加载中=Pending/Streaming 且全局导航可用；为空=`还没有训练记录` + `[n]`；报错=SQLite 原因、恢复动作与 `[t]`；160×48、120×36、80×24、ASCII、reduce-motion、CJK/长文本、快捷键/焦点/resize 快照通过；`gofmt -l` 无输出、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 -cover ./...`、单二进制构建及真实 `init → run` 烟测通过；training/db 覆盖率 75.2%/71.8% | `feat(training): T-006 add training home and navigation` |

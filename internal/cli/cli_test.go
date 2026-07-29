@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/interviewcraft/interviewcraft/internal/tui/layout"
 )
 
 func TestRunHelpListsOrderedCommandPlaceholders(t *testing.T) {
@@ -65,18 +67,101 @@ func TestRunKnownPlaceholderIsActionable(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	code := Run([]string{"run"}, &stdout, &stderr)
+	code := Run([]string{"export"}, &stdout, &stderr)
 
 	if code != ExitUnavailable {
-		t.Fatalf("Run(run) exit code = %d, want %d", code, ExitUnavailable)
+		t.Fatalf("Run(export) exit code = %d, want %d", code, ExitUnavailable)
 	}
 	if stdout.Len() != 0 {
-		t.Fatalf("Run(run) stdout = %q, want empty", stdout.String())
+		t.Fatalf("Run(export) stdout = %q, want empty", stdout.String())
 	}
-	for _, expected := range []string{"尚未实现", "T-006", "interviewcraft --help"} {
+	for _, expected := range []string{"尚未实现", "T-018", "interviewcraft --help"} {
 		if !strings.Contains(stderr.String(), expected) {
-			t.Errorf("Run(run) stderr = %q, want %q", stderr.String(), expected)
+			t.Errorf("Run(export) stderr = %q, want %q", stderr.String(), expected)
 		}
+	}
+}
+
+func TestRunTrainingHomeAfterInit(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "data")
+	t.Setenv("INTERVIEWCRAFT_DATA_DIR", dataDir)
+	t.Setenv("COLUMNS", "80")
+	t.Setenv("LINES", "24")
+
+	var initStdout bytes.Buffer
+	var initStderr bytes.Buffer
+	if code := Run([]string{"init"}, &initStdout, &initStderr); code != ExitOK {
+		t.Fatalf("init exit=%d stderr=%q", code, initStderr.String())
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(
+		[]string{"run", "--ascii", "--reduce-motion", "--no-color"},
+		&stdout,
+		&stderr,
+	)
+	if code != ExitOK {
+		t.Fatalf("run exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{
+		"InterviewCraft",
+		"TRAINING",
+		"还没有训练记录",
+		"[n] 创建第一场模拟",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("run stdout missing %q", expected)
+		}
+	}
+	if strings.Contains(stdout.String(), "┌") {
+		t.Errorf("run --ascii output contains Unicode border")
+	}
+	lines := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
+	if len(lines) != 24 {
+		t.Fatalf("run rows = %d, want 24", len(lines))
+	}
+	for index, line := range lines {
+		if got := layout.VisibleWidth(line); got != 80 {
+			t.Fatalf("run row %d width=%d, want 80", index, got)
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("run stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRunTrainingHomeWithoutInitShowsRecovery(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "missing")
+	t.Setenv("INTERVIEWCRAFT_DATA_DIR", dataDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"run", "--no-color"}, &stdout, &stderr)
+
+	if code != ExitFailure {
+		t.Fatalf("run exit=%d, want %d", code, ExitFailure)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("run stdout=%q, want empty", stdout.String())
+	}
+	for _, expected := range []string{"尚未初始化", "interviewcraft init"} {
+		if !strings.Contains(stderr.String(), expected) {
+			t.Errorf("run stderr missing %q", expected)
+		}
+	}
+}
+
+func TestRunTrainingHomeRejectsUnknownOption(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"run", "--unknown"}, &stdout, &stderr)
+
+	if code != ExitUsage {
+		t.Fatalf("run exit=%d, want %d", code, ExitUsage)
+	}
+	if !strings.Contains(stderr.String(), "interviewcraft run --help") {
+		t.Fatalf("run stderr=%q", stderr.String())
 	}
 }
 
