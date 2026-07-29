@@ -172,6 +172,24 @@ func TestValidateRejectsUnsupportedOptionalModes(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsCredentialsInProviderEndpoint(t *testing.T) {
+	t.Parallel()
+
+	runtime := defaults(t.TempDir())
+	runtime.LLM = LLM{
+		Provider:  ProviderOpenAICompatible,
+		Endpoint:  "https://user:secret@example.test/v1?api_key=secret",
+		Model:     "test-model",
+		APIKeyEnv: "OPENAI_API_KEY",
+	}
+
+	err := runtime.Validate()
+
+	if err == nil || !domainerr.IsCode(err, domainerr.CodeValidation) {
+		t.Fatalf("Validate error = %v, want validation code", err)
+	}
+}
+
 func testSource(home string, environment map[string]string) Source {
 	return Source{
 		UserHomeDir: func() (string, error) {

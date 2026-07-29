@@ -358,6 +358,9 @@ func validateHTTPEndpoint(value string) error {
 	if parsed.Host == "" {
 		return errors.New("endpoint host is missing")
 	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("endpoint must not contain credentials, query, or fragment")
+	}
 	return nil
 }
 
