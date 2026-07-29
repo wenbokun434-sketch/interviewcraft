@@ -1,0 +1,23 @@
+# Build outputs
+/interviewcraft
+/interviewcraft.exe
+/dist/
+*.test
+coverage.out
+
+# Local runtime data
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
