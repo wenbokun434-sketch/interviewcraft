@@ -74,6 +74,8 @@ type SidebarEvent struct {
 	Intent      contracts.CoachIntent
 	HelpLevel   contracts.HelpLevel
 	Tags        []string
+	Content     string
+	PolicyNote  string
 	Outcome     string
 	PausedTimer bool
 	OccurredAt  time.Time

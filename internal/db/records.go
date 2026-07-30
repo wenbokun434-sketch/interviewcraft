@@ -465,17 +465,51 @@ func (s *Store) AddSidebarEvent(ctx context.Context, event SidebarEvent) error {
 	if err != nil {
 		return invalidInput("encode sidebar tags", "Coach 标签无法编码。", err)
 	}
-	_, err = s.sql.ExecContext(ctx, `
+	tx, err := s.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return storageError(
+			"begin Coach event transaction",
+			s.paths.Database,
+			"保留当前学习状态，检查数据库后重试。",
+			err,
+		)
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO sidebar_events(
 			id, session_id, question_id, intent, help_level,
-			tags_json, outcome, paused_timer, occurred_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			tags_json, content, policy_note, outcome,
+			paused_timer, occurred_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, event.ID, event.SessionID, event.QuestionID, event.Intent,
-		event.HelpLevel, string(tags), event.Outcome,
+		event.HelpLevel, string(tags), event.Content, event.PolicyNote,
+		event.Outcome,
 		boolInteger(event.PausedTimer), timeText(event.OccurredAt))
 	if err != nil {
 		return storageError(
 			"save Coach event",
+			s.paths.Database,
+			"保留当前学习状态，检查数据库后重试。",
+			err,
+		)
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO coach_usage(
+			event_id, session_id, question_id, occurred_at
+		) VALUES (?, ?, ?, ?)
+	`, event.ID, event.SessionID, event.QuestionID,
+		timeText(event.OccurredAt))
+	if err != nil {
+		return storageError(
+			"save Coach quota usage",
+			s.paths.Database,
+			"保留当前学习状态，检查数据库后重试。",
+			err,
+		)
+	}
+	if err := tx.Commit(); err != nil {
+		return storageError(
+			"commit Coach event",
 			s.paths.Database,
 			"保留当前学习状态，检查数据库后重试。",
 			err,
@@ -494,10 +528,10 @@ func (s *Store) ListSidebarEvents(
 	}
 	rows, err := s.sql.QueryContext(ctx, `
 		SELECT id, question_id, intent, help_level, tags_json,
-		       outcome, paused_timer, occurred_at
+		       content, policy_note, outcome, paused_timer, occurred_at
 		FROM sidebar_events
 		WHERE session_id = ?
-		ORDER BY occurred_at, id
+		ORDER BY julianday(occurred_at), id
 	`, sessionID)
 	if err != nil {
 		return nil, storageError(
@@ -521,6 +555,8 @@ func (s *Store) ListSidebarEvents(
 			&event.Intent,
 			&event.HelpLevel,
 			&tags,
+			&event.Content,
+			&event.PolicyNote,
 			&event.Outcome,
 			&paused,
 			&occurredAt,

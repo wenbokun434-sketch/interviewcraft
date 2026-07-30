@@ -46,11 +46,12 @@ func TestOpenCreatesLayoutAndAppliesMigrationsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if version != 2 {
-		t.Fatalf("SchemaVersion = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("SchemaVersion = %d, want 3", version)
 	}
 	assertPhases(t, states, []async.Phase{
 		async.Pending,
+		async.Streaming,
 		async.Streaming,
 		async.Streaming,
 		async.Succeeded,
@@ -262,6 +263,7 @@ func TestDeleteProfileCascadesAllDerivedRows(t *testing.T) {
 		"session_events",
 		"drafts",
 		"sidebar_events",
+		"coach_usage",
 		"code_submissions",
 		"reports",
 	} {
@@ -530,6 +532,7 @@ func tableCount(t *testing.T, store *Store, table string) int {
 		"session_events":     true,
 		"drafts":             true,
 		"sidebar_events":     true,
+		"coach_usage":        true,
 		"code_submissions":   true,
 		"reports":            true,
 	}

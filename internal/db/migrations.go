@@ -17,6 +17,11 @@ var defaultMigrations = []migration{
 		name:    "profile_source_metadata",
 		sql:     profileSourceMetadataSQL,
 	},
+	{
+		version: 3,
+		name:    "coach_event_content",
+		sql:     coachEventContentSQL,
+	},
 }
 
 const initialSchemaSQL = `
@@ -128,4 +133,24 @@ CREATE TABLE profile_sources (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+`
+
+const coachEventContentSQL = `
+ALTER TABLE sidebar_events
+    ADD COLUMN content TEXT NOT NULL DEFAULT '';
+ALTER TABLE sidebar_events
+    ADD COLUMN policy_note TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE coach_usage (
+    event_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    question_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+);
+CREATE INDEX coach_usage_question_idx
+    ON coach_usage(session_id, question_id, occurred_at, event_id);
+
+INSERT INTO coach_usage(event_id, session_id, question_id, occurred_at)
+SELECT id, session_id, question_id, occurred_at
+FROM sidebar_events;
 `
