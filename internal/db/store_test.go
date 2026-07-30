@@ -46,10 +46,15 @@ func TestOpenCreatesLayoutAndAppliesMigrationsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("SchemaVersion = %d, want 1", version)
+	if version != 2 {
+		t.Fatalf("SchemaVersion = %d, want 2", version)
 	}
-	assertPhases(t, states, []async.Phase{async.Pending, async.Streaming, async.Succeeded})
+	assertPhases(t, states, []async.Phase{
+		async.Pending,
+		async.Streaming,
+		async.Streaming,
+		async.Succeeded,
+	})
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -251,6 +256,7 @@ func TestDeleteProfileCascadesAllDerivedRows(t *testing.T) {
 
 	for _, table := range []string{
 		"candidate_profiles",
+		"profile_sources",
 		"scenarios",
 		"sessions",
 		"session_events",
@@ -518,6 +524,7 @@ func tableCount(t *testing.T, store *Store, table string) int {
 	t.Helper()
 	allowed := map[string]bool{
 		"candidate_profiles": true,
+		"profile_sources":    true,
 		"scenarios":          true,
 		"sessions":           true,
 		"session_events":     true,

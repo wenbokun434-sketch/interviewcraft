@@ -1,0 +1,4 @@
+Jane Doe
+Backend Engineer
+Payment Platform
+Go, Redis, PostgreSQL

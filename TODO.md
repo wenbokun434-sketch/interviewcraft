@@ -125,10 +125,10 @@
   - 主链路回归：无 Provider 时历史可浏览、设置可打开、Lite 不崩溃。
 - 完成后提交：`feat(provider): T-007 add LLM adapters and settings`
 
-### [ ] T-008 简历解析适配器与画像服务
+### [x] T-008 简历解析适配器与画像服务
 
 - 修改目标：解析 PDF/DOCX/TXT/粘贴文本，形成可追溯、可编辑的 CandidateProfile。
-- 允许修改的范围：`internal/adapters/resume/`、`internal/core/profile/`、测试样例、对应测试、`TODO.md` 当前任务状态与记录。
+- 允许修改的范围：`internal/adapters/resume/`、`internal/core/profile/`、字段锁定/原文恢复所必需的 `internal/db/` Profile 元数据迁移与查询、测试样例、对应测试、`TODO.md` 当前任务状态与记录。
 - 不允许破坏的逻辑：不得虚构履历；未确认推断不得进入既定事实；取消/失败不得留下半成品画像；文件不得超过 10MB。
 - 验收的标准：
   - 支持四种输入路径，事实带 `source_span`，推断带置信度与待确认标志。
@@ -323,3 +323,4 @@
 | R-005 | T-005 | 建立语义主题、基础组件、焦点模型与响应式 AppShell | `internal/tui/theme/`、`internal/tui/components/`、`internal/tui/layout/`、组件/快照测试、`TODO.md` | 不使用功能局部原始颜色；Pane 深度不超过两层；不依赖颜色或鼠标；不假设 Unicode 固定宽度；不提前实现业务 Screen | 11 个 DESIGN 核心组件齐备；`auto/dark/light`、true-color/ANSI-16/no-color、ASCII、reduce-motion 可切换；主流程=键盘焦点循环、overlay 精确恢复草稿焦点；加载中=Progress 与 Pending/Streaming/Succeeded/Failed Activity；为空=SelectableList/TextComposer 提供行动；报错=类型化安全信息与尺寸阻塞态；160×48、120×36、80×24、72×22 快照及 CJK、长路径、长模型名、ASCII overlay 通过；`gofmt -l`、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 -cover ./...`、单二进制构建和 CLI/存储回归通过；components/layout/theme 覆盖率 80.8%/68.2%/70.1% | `feat(tui): T-005 build design-system primitives` |
 | R-006 | T-006 | 实现 P-01 训练主页、全局导航、最近训练与 Practice Queue | `internal/tui/screens/training/`、必要查询层、`internal/cli/` 的 `run` 最小启动接线、对应测试、`TODO.md` | 单屏一个主行动；分数必须带维度；继续训练恢复最后持久化事件；不改 `docs/`；不提前实现 Profile/Report/Provider 业务 | 主流程=继续精确恢复最后持久化事件与独立草稿、新建进入画像、最近报告与 Practice Queue 跳转；加载中=Pending/Streaming 且全局导航可用；为空=`还没有训练记录` + `[n]`；报错=SQLite 原因、恢复动作与 `[t]`；160×48、120×36、80×24、ASCII、reduce-motion、CJK/长文本、快捷键/焦点/resize 快照通过；`gofmt -l` 无输出、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 -cover ./...`、单二进制构建及真实 `init → run` 烟测通过；training/db 覆盖率 75.2%/71.8% | `feat(training): T-006 add training home and navigation` |
 | R-007 | T-007 | 实现 OpenAI-compatible/Ollama 适配器、结构化输出与设置页 | `internal/adapters/llm/`、`internal/tui/screens/settings/`、必要配置与测试替身、对应测试、`TODO.md` | 密钥不写日志/导出/界面；Provider 失败不丢历史或草稿；无 Provider 禁止新场景但历史与设置仍可用；Lite 不依赖 Docker | 主流程=OpenAI-compatible `/models`+`/chat/completions` 与 Ollama `/api/tags`+`/api/chat` 请求/响应、JSON Schema 校验和仅一次修复重试通过；加载中=连接 Pending/Activity 且设置可浏览；为空=无 Provider 显示配置入口、历史可用且新场景禁用；报错=endpoint/HTTP、本地或远端认证、模型缺失分别诊断，超时与取消类型化；DB/LLM/Runner/数据目录均显示文字状态与恢复动作；密钥值/引用不渲染，endpoint 禁止凭据/query/fragment；160×48、120×36、80×24、ASCII、reduce-motion、焦点/resize 快照通过；`gofmt -l` 无输出、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 -cover ./...`、单二进制构建及无 Provider `init → run` 回归通过；llm/settings/config 覆盖率 77.0%/77.0%/70.4% | `feat(provider): T-007 add LLM adapters and settings` |
+| R-008 | T-008 | 实现四类简历输入、可追溯画像服务与完整持久化 | `internal/adapters/resume/`、`internal/core/profile/`、必要的 `internal/db/` Profile 元数据迁移/查询、测试样例、对应测试、`TODO.md` | 不虚构履历；未确认推断不进入事实；失败/取消不保存半成品；文件不超过 10MB；不改 `docs/`；不提前实现 P-02 UI | PDF/DOCX/TXT/粘贴提取与 10MB 限制通过；主流程=粘贴→严格 Schema→byte span 校验→SQLite 保存→重启恢复；加载中=Pending/Streaming 且进度中取消后无半成品；空数据=空简历禁止继续；报错=无效路径/格式保留来源并提供 `[p]` 粘贴回退；编辑、锁定、删除、保存失败回滚、元数据事务回滚及级联完整删除通过；`gofmt -l` 无输出、`go mod verify`、`go vet ./...`、`CGO_ENABLED=0 GOPROXY=off go test -count=1 -cover ./...`、单二进制构建通过；resume/profile/db 覆盖率 67.6%/76.8%/72.4% | `feat(profile): T-008 implement resume parsing and profile service` |

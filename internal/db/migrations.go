@@ -12,6 +12,11 @@ var defaultMigrations = []migration{
 		name:    "initial_local_storage",
 		sql:     initialSchemaSQL,
 	},
+	{
+		version: 2,
+		name:    "profile_source_metadata",
+		sql:     profileSourceMetadataSQL,
+	},
 }
 
 const initialSchemaSQL = `
@@ -107,6 +112,20 @@ CREATE TABLE provider_configs (
     model TEXT NOT NULL,
     secret_ref TEXT NOT NULL,
     enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    updated_at TEXT NOT NULL
+);
+`
+
+const profileSourceMetadataSQL = `
+CREATE TABLE profile_sources (
+    profile_id TEXT PRIMARY KEY
+        REFERENCES candidate_profiles(id) ON DELETE CASCADE,
+    source_kind TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_text TEXT NOT NULL,
+    locked_fact_ids_json TEXT NOT NULL CHECK (json_valid(locked_fact_ids_json)),
+    locked_inference_ids_json TEXT NOT NULL CHECK (json_valid(locked_inference_ids_json)),
+    created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 `
