@@ -437,6 +437,52 @@ func TestFailedEditDoesNotMutateStoredProfile(t *testing.T) {
 	}
 }
 
+func TestConfirmPersistsReviewAndContentEditRequiresReconfirmation(t *testing.T) {
+	t.Parallel()
+
+	source := profileSource()
+	now := time.Date(2026, 7, 30, 11, 30, 0, 0, time.UTC)
+	repository := newMemoryRepository()
+	repository.items["profile-1"] = Aggregate{
+		ID:        "profile-1",
+		Candidate: profileCandidate(source.Text),
+		Metadata: Metadata{
+			Source:             source,
+			LockedFactIDs:      []contracts.EvidenceID{},
+			LockedInferenceIDs: []string{},
+			CreatedAt:          now.Add(-time.Hour),
+			UpdatedAt:          now.Add(-time.Hour),
+		},
+	}
+	service := NewService(repository, nil, func() time.Time { return now })
+
+	confirmed, err := service.Confirm(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if confirmed.ConfirmedAt == nil || !confirmed.ConfirmedAt.Equal(now) {
+		t.Fatalf("ConfirmedAt = %#v, want %s", confirmed.ConfirmedAt, now)
+	}
+
+	edited, err := service.EditFact(
+		context.Background(),
+		"profile-1",
+		fact(
+			source.Text,
+			"fact-payment",
+			"technology",
+			"Go",
+			"Built payment service with Go.",
+		),
+	)
+	if err != nil {
+		t.Fatalf("EditFact: %v", err)
+	}
+	if edited.ConfirmedAt != nil {
+		t.Fatalf("edited ConfirmedAt = %#v, want nil", edited.ConfirmedAt)
+	}
+}
+
 func profileSource() Source {
 	return Source{
 		Kind: SourcePaste,

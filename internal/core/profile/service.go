@@ -154,6 +154,20 @@ func (service *Service) Load(
 	return service.repository.GetProfileAggregate(ctx, profileID)
 }
 
+// Confirm records that the user reviewed the current facts and pending
+// inferences. Pending inferences remain inferences and are never promoted to
+// facts by this command.
+func (service *Service) Confirm(
+	ctx context.Context,
+	profileID string,
+) (Aggregate, error) {
+	return service.mutate(ctx, profileID, func(aggregate *Aggregate) error {
+		confirmedAt := service.now().UTC()
+		aggregate.ConfirmedAt = &confirmedAt
+		return nil
+	})
+}
+
 // EditFact replaces one unlocked fact while retaining trace validation.
 func (service *Service) EditFact(
 	ctx context.Context,
@@ -172,6 +186,7 @@ func (service *Service) EditFact(
 			return validationError("edit profile fact", "找不到要编辑的事实。")
 		}
 		aggregate.Candidate.Facts[index] = replacement
+		aggregate.ConfirmedAt = nil
 		return nil
 	})
 }
@@ -203,6 +218,7 @@ func (service *Service) EditInference(
 			return validationError("edit profile inference", "找不到要编辑的推断。")
 		}
 		aggregate.Candidate.Inferences[index] = replacement
+		aggregate.ConfirmedAt = nil
 		return nil
 	})
 }
@@ -229,6 +245,7 @@ func (service *Service) DeleteItem(
 				factIndex,
 				factIndex+1,
 			)
+			aggregate.ConfirmedAt = nil
 			return nil
 		}
 		inferenceIndex := slices.IndexFunc(
@@ -241,6 +258,7 @@ func (service *Service) DeleteItem(
 				inferenceIndex,
 				inferenceIndex+1,
 			)
+			aggregate.ConfirmedAt = nil
 			return nil
 		}
 		return validationError("delete profile item", "找不到要删除的画像字段。")
