@@ -1,0 +1,18 @@
+{
+  "id": "algorithm_coding",
+  "label": "算法编码",
+  "description": "练习澄清、解题过程、复杂度分析与可验证实现。",
+  "default_mode": "strict",
+  "default_time_budget_seconds": 1800,
+  "default_max_follow_ups": 2,
+  "question_guidance": [
+    "题目可以是明确标记的通用编码题",
+    "要求先澄清约束再描述方案",
+    "覆盖复杂度、边界条件和测试思路"
+  ],
+  "rubric_guidance": [
+    "主动澄清约束",
+    "方案与复杂度合理",
+    "边界条件和测试完整"
+  ]
+}

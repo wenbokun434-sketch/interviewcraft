@@ -1,0 +1,18 @@
+{
+  "id": "mixed",
+  "label": "综合面",
+  "description": "在固定时间内组合经历、基础技术、设计或编码问题。",
+  "default_mode": "standard",
+  "default_time_budget_seconds": 1800,
+  "default_max_follow_ups": 2,
+  "question_guidance": [
+    "至少一题引用已确认履历事实",
+    "不同题目意图不得重复",
+    "无证据题必须明确标记为通用问题"
+  ],
+  "rubric_guidance": [
+    "经历表达可信",
+    "技术推理清晰",
+    "时间分配和收束合理"
+  ]
+}

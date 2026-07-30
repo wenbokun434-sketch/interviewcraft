@@ -1,0 +1,18 @@
+{
+  "id": "project_deep_dive",
+  "label": "项目深挖",
+  "description": "围绕项目架构、个人贡献、技术权衡和量化结果逐层深入。",
+  "default_mode": "standard",
+  "default_time_budget_seconds": 1200,
+  "default_max_follow_ups": 2,
+  "question_guidance": [
+    "每个深挖问题必须引用已确认项目事实",
+    "覆盖架构、个人贡献、失败恢复和权衡",
+    "无项目证据时只能生成明确标记的通用澄清题"
+  ],
+  "rubric_guidance": [
+    "能说明个人贡献",
+    "能解释技术取舍",
+    "能用数据或可验证结果支撑"
+  ]
+}

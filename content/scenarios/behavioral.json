@@ -1,0 +1,18 @@
+{
+  "id": "behavioral",
+  "label": "行为面",
+  "description": "围绕真实经历、协作、冲突和复盘进行证据化追问。",
+  "default_mode": "standard",
+  "default_time_budget_seconds": 1200,
+  "default_max_follow_ups": 2,
+  "question_guidance": [
+    "优先使用已确认的项目或成果事实",
+    "要求候选人说明情境、行动、权衡和结果",
+    "没有对应经历时使用澄清式通用问题"
+  ],
+  "rubric_guidance": [
+    "回答结构清晰",
+    "个人行动与团队背景可区分",
+    "结果与复盘有具体证据"
+  ]
+}

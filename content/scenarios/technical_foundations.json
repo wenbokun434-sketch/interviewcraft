@@ -1,0 +1,18 @@
+{
+  "id": "technical_foundations",
+  "label": "基础技术",
+  "description": "结合已确认技能验证原理、边界、故障与实践经验。",
+  "default_mode": "standard",
+  "default_time_budget_seconds": 1200,
+  "default_max_follow_ups": 2,
+  "question_guidance": [
+    "优先围绕画像中已确认技能提问",
+    "从概念进入工程边界和失败模式",
+    "画像未覆盖的知识点必须标为通用问题"
+  ],
+  "rubric_guidance": [
+    "概念准确",
+    "能连接工程实践",
+    "能识别边界与故障模式"
+  ]
+}

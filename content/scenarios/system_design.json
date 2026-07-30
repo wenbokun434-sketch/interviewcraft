@@ -1,0 +1,18 @@
+{
+  "id": "system_design",
+  "label": "系统设计",
+  "description": "练习需求澄清、容量估算、架构权衡和演进路径。",
+  "default_mode": "standard",
+  "default_time_budget_seconds": 2400,
+  "default_max_follow_ups": 2,
+  "question_guidance": [
+    "优先连接已确认的系统或技术事实",
+    "覆盖需求、规模、数据模型、故障和权衡",
+    "没有相关系统经历时把题目标记为通用设计题"
+  ],
+  "rubric_guidance": [
+    "先澄清功能与非功能需求",
+    "容量与瓶颈判断有依据",
+    "能解释关键取舍和演进"
+  ]
+}
