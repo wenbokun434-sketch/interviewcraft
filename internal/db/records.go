@@ -333,7 +333,7 @@ func (s *Store) ListSessionEvents(
 		       content, occurred_at, evidence_refs_json
 		FROM session_events
 		WHERE session_id = ?
-		ORDER BY occurred_at, sequence
+		ORDER BY julianday(occurred_at), sequence
 	`, sessionID)
 	if err != nil {
 		return nil, storageError(
