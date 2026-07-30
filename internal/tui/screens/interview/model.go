@@ -11,8 +11,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/interviewcraft/interviewcraft/internal/core/async"
+	corecoach "github.com/interviewcraft/interviewcraft/internal/core/coach"
 	"github.com/interviewcraft/interviewcraft/internal/core/contracts"
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
 	coreinterview "github.com/interviewcraft/interviewcraft/internal/core/interview"
@@ -24,7 +26,7 @@ import (
 const (
 	focusComposer = "composer"
 	focusTrace    = "trace"
-	focusSession  = "session"
+	focusCoach    = "coach"
 	focusHelp     = "help"
 )
 
@@ -101,6 +103,10 @@ const (
 	IntentRequestEndSession  Intent = "request-end-session"
 	IntentCancelEnd          Intent = "cancel-end"
 	IntentConfirmEnd         Intent = "confirm-end"
+	IntentCoachAsk           Intent = "coach-ask"
+	IntentCoachAskPaused     Intent = "coach-ask-paused"
+	IntentCoachRetry         Intent = "coach-retry"
+	IntentCoachMark          Intent = "coach-mark"
 )
 
 // Destination is a global navigation target.
@@ -113,40 +119,56 @@ const (
 
 // Action is the controller-facing result of one key.
 type Action struct {
-	Intent      Intent
-	Destination Destination
+	Intent       Intent
+	Destination  Destination
+	CoachIntent  contracts.CoachIntent
+	CoachOutcome corecoach.LearningOutcome
 }
 
 // Options constructs an interview room around one persisted Session.
 type Options struct {
-	SessionID       string
-	Room            Room
-	Now             func() time.Time
-	NextSubmission  func() string
-	NextOperationID func() string
-	Width           int
-	Height          int
-	Theme           theme.Theme
+	SessionID        string
+	Room             Room
+	Coach            CoachRoom
+	Now              func() time.Time
+	NextSubmission   func() string
+	NextOperationID  func() string
+	NextCoachRequest func() string
+	Width            int
+	Height           int
+	Theme            theme.Theme
 }
 
 // Model owns P-04 draft, focus, trace selection, async state, and recovery.
 type Model struct {
 	mu sync.RWMutex
 
-	sessionID       string
-	room            Room
-	now             func() time.Time
-	nextSubmission  func() string
-	nextOperationID func() string
-	focus           *layout.FocusModel
-	snapshot        coreinterview.Snapshot
-	draft           string
-	lastSubmission  coreinterview.SubmitRequest
-	operation       async.State[Progress]
-	cancelWaiting   context.CancelFunc
-	traceSelected   int
-	helpOpen        bool
-	currentTime     time.Time
+	sessionID        string
+	room             Room
+	coach            CoachRoom
+	now              func() time.Time
+	nextSubmission   func() string
+	nextOperationID  func() string
+	nextCoachRequest func() string
+	focus            *layout.FocusModel
+	snapshot         coreinterview.Snapshot
+	draft            string
+	draftCursor      int
+	lastSubmission   coreinterview.SubmitRequest
+	operation        async.State[Progress]
+	cancelWaiting    context.CancelFunc
+	traceSelected    int
+	helpOpen         bool
+	currentTime      time.Time
+
+	coachHistory     []db.SidebarEvent
+	coachDraft       string
+	coachOperation   async.State[string]
+	coachUsage       corecoach.Usage
+	coachPolicy      corecoach.Policy
+	lastCoachRequest corecoach.AskRequest
+	coachOverlay     bool
+	coachSelected    int
 
 	Width  int
 	Height int
@@ -167,7 +189,7 @@ func New(options Options) (*Model, error) {
 	focus, err := layout.NewFocusModel(
 		focusComposer,
 		focusTrace,
-		focusSession,
+		focusCoach,
 	)
 	if err != nil {
 		return nil, err
@@ -188,21 +210,32 @@ func New(options Options) (*Model, error) {
 			return randomID("control")
 		}
 	}
+	nextCoachRequest := options.NextCoachRequest
+	if nextCoachRequest == nil {
+		nextCoachRequest = func() string {
+			return randomID("coach")
+		}
+	}
+	coachReady := "Coach ready"
 	model := &Model{
-		sessionID:       sessionID,
-		room:            options.Room,
-		now:             now,
-		nextSubmission:  nextSubmission,
-		nextOperationID: nextOperationID,
-		focus:           focus,
+		sessionID:        sessionID,
+		room:             options.Room,
+		coach:            options.Coach,
+		now:              now,
+		nextSubmission:   nextSubmission,
+		nextOperationID:  nextOperationID,
+		nextCoachRequest: nextCoachRequest,
+		focus:            focus,
 		operation: async.NewSucceeded(Progress{
 			Stage:   StageIdle,
 			Message: "文字面试室等待恢复",
 		}),
-		currentTime: now().UTC(),
-		Width:       options.Width,
-		Height:      options.Height,
-		Theme:       options.Theme,
+		currentTime:    now().UTC(),
+		coachHistory:   []db.SidebarEvent{},
+		coachOperation: async.NewSucceeded(coachReady),
+		Width:          options.Width,
+		Height:         options.Height,
+		Theme:          options.Theme,
 	}
 	model.updateFocusOrderLocked()
 	return model, nil
@@ -238,6 +271,36 @@ func (model *Model) Draft() string {
 	return model.draft
 }
 
+// DraftCursor returns the main composer's rune offset.
+func (model *Model) DraftCursor() int {
+	if model == nil {
+		return 0
+	}
+	model.mu.RLock()
+	defer model.mu.RUnlock()
+	return model.draftCursor
+}
+
+// SetDraftCursor records the main composer's exact rune offset.
+func (model *Model) SetDraftCursor(offset int) error {
+	if model == nil {
+		return errors.New("interview model is nil")
+	}
+	model.mu.Lock()
+	defer model.mu.Unlock()
+	limit := utf8.RuneCountInString(model.draft)
+	if offset < 0 || offset > limit {
+		return roomError(
+			domainerr.CodeValidation,
+			"主回答光标位置无效。",
+			"把光标移动到当前草稿范围内。",
+			false,
+		)
+	}
+	model.draftCursor = offset
+	return nil
+}
+
 // Resize updates responsive focus order without losing draft or selection.
 func (model *Model) Resize(width, height int) {
 	if model == nil {
@@ -245,9 +308,11 @@ func (model *Model) Resize(width, height int) {
 	}
 	model.mu.Lock()
 	defer model.mu.Unlock()
+	coachWasActive := model.focus.Active() == focusCoach
 	model.Width = width
 	model.Height = height
 	model.updateFocusOrderLocked()
+	model.restoreCoachFocusAfterResizeLocked(coachWasActive)
 }
 
 // Tick advances the visible timer without mutating persisted events.
@@ -306,6 +371,7 @@ func (model *Model) Load(ctx context.Context, observer Observer) error {
 	state := cloneState(model.operation)
 	model.mu.Unlock()
 	notify(observer, state)
+	model.loadCoachHistory(ctx)
 	return nil
 }
 
@@ -329,6 +395,10 @@ func (model *Model) UpdateDraft(
 		)
 	}
 	model.draft = value
+	model.draftCursor = min(
+		model.draftCursor,
+		utf8.RuneCountInString(value),
+	)
 	if model.lastSubmission.SubmissionID != "" &&
 		strings.TrimSpace(value) != model.lastSubmission.Answer {
 		model.lastSubmission = coreinterview.SubmitRequest{}
@@ -453,6 +523,7 @@ func (model *Model) submit(
 	model.mu.Lock()
 	model.applySnapshotLocked(result.Snapshot)
 	model.draft = ""
+	model.draftCursor = 0
 	model.lastSubmission = coreinterview.SubmitRequest{}
 	stage, message := readyStage(result.Snapshot)
 	model.operation = async.NewSucceeded(Progress{
@@ -640,6 +711,7 @@ func (model *Model) ConfirmEnd(ctx context.Context) error {
 	if snapshot.Phase == coreinterview.PhaseCompleted ||
 		currentQuestionID(snapshot) != questionID {
 		model.draft = ""
+		model.draftCursor = 0
 		model.lastSubmission = coreinterview.SubmitRequest{}
 	}
 	stage, message := readyStage(snapshot)
@@ -665,6 +737,9 @@ func (model *Model) HandleKey(key string) Action {
 			model.focus.CloseOverlay()
 		}
 		return Action{}
+	}
+	if handled, action := model.handleCoachKeyLocked(key); handled {
+		return action
 	}
 	if model.isBusyLocked() {
 		if key == "escape" || key == "esc" {
@@ -754,18 +829,35 @@ func (model *Model) restoreFailedAnswer(
 func (model *Model) applySnapshotLocked(
 	snapshot coreinterview.Snapshot,
 ) {
+	previousDraft := model.draft
+	previousCursor := model.draftCursor
 	model.snapshot = cloneSnapshot(snapshot)
 	model.currentTime = model.now().UTC()
 	if snapshot.Draft != nil {
 		model.draft = snapshot.Draft.Content
+		if model.draft == previousDraft {
+			model.draftCursor = min(
+				previousCursor,
+				utf8.RuneCountInString(model.draft),
+			)
+		} else {
+			model.draftCursor = utf8.RuneCountInString(model.draft)
+		}
 	} else if snapshot.Phase == coreinterview.PhaseCompleted {
 		model.draft = ""
+		model.draftCursor = 0
 	}
 	model.restorePendingSubmissionLocked()
 	if count := len(snapshot.Events); count > 0 {
 		model.traceSelected = count - 1
 	} else {
 		model.traceSelected = 0
+	}
+	model.refreshCoachPolicyLocked()
+	if count := len(model.currentQuestionCoachEventsLocked()); count > 0 {
+		model.coachSelected = count - 1
+	} else {
+		model.coachSelected = 0
 	}
 }
 
@@ -815,19 +907,22 @@ func (model *Model) updateFocusOrderLocked() {
 		return
 	}
 	plan := layout.Calculate(model.Width, model.Height)
-	targets := []string{focusComposer, focusSession}
+	targets := []string{focusComposer, focusCoach}
 	if plan.Mode == layout.Wide {
-		targets = []string{focusComposer, focusTrace, focusSession}
+		targets = []string{focusComposer, focusTrace, focusCoach}
+	}
+	if plan.Mode == layout.Narrow || plan.Mode == layout.Blocked {
+		targets = []string{focusComposer}
 	}
 	_ = model.focus.SetVisible(targets...)
 }
 
 func (model *Model) moveTraceLocked(delta int) {
 	if model.focus.Active() != focusTrace ||
-		len(model.snapshot.Events) == 0 {
+		len(model.traceItemsLocked()) == 0 {
 		return
 	}
-	count := len(model.snapshot.Events)
+	count := len(model.traceItemsLocked())
 	model.traceSelected = (model.traceSelected + delta%count + count) % count
 }
 

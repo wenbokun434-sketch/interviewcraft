@@ -190,8 +190,8 @@ func TestInterviewRoomCompleteKeyboardFlowAndTrace(t *testing.T) {
 	for _, expected := range []string{
 		"ANSWER TRACE",
 		"INTERVIEW ROOM",
-		"SESSION",
-		"evaluation pending",
+		"COACH",
+		"session complete",
 		"会话完成，已进入待评估状态",
 	} {
 		if !strings.Contains(rendered, expected) {
@@ -633,7 +633,7 @@ func TestEmptyRoomAndResponsiveDraftRecovery(t *testing.T) {
 				required: []string{
 					"ANSWER TRACE",
 					"INTERVIEW ROOM",
-					"SESSION",
+					"COACH",
 					"QUESTION 01/02",
 					"已恢复本地草稿",
 				},
@@ -642,7 +642,7 @@ func TestEmptyRoomAndResponsiveDraftRecovery(t *testing.T) {
 				name: "split_120x36", width: 120, height: 36,
 				required: []string{
 					"INTERVIEW ROOM",
-					"SESSION",
+					"COACH",
 					"缓存失效",
 					"Ctrl+Enter",
 				},

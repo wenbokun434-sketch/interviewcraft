@@ -2,11 +2,11 @@ package interview
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/interviewcraft/interviewcraft/internal/core/async"
-	"github.com/interviewcraft/interviewcraft/internal/core/contracts"
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
 	coreinterview "github.com/interviewcraft/interviewcraft/internal/core/interview"
 	"github.com/interviewcraft/interviewcraft/internal/db"
@@ -31,10 +31,11 @@ func (model *Model) Render() (string, error) {
 	}
 
 	mainWidth := max(1, plan.MainWidth-2)
-	sessionWidth := max(1, plan.CoachWidth-2)
+	coachWidth := max(1, plan.CoachWidth-2)
 	traceWidth := max(1, plan.TraceWidth-2)
 	if plan.Mode == layout.Narrow || plan.Mode == layout.Blocked {
 		mainWidth = max(1, model.Width-2)
+		coachWidth = max(1, model.Width-2)
 	}
 	mainLines, err := model.mainLinesLocked(
 		mainWidth,
@@ -54,7 +55,13 @@ func (model *Model) Render() (string, error) {
 		traceWidth,
 		max(1, plan.ContentHeight-2),
 	)
-	sessionLines := model.sessionLinesLocked(sessionWidth)
+	coachLines, err := model.coachLinesLocked(
+		coachWidth,
+		max(1, plan.ContentHeight-2),
+	)
+	if err != nil {
+		return "", err
+	}
 	timer := model.timerLocked()
 
 	tracePane := components.Pane{
@@ -69,13 +76,18 @@ func (model *Model) Render() (string, error) {
 		State:  paneState(model.focus.Active() == focusComposer),
 		Lines:  mainLines,
 	}
-	sessionPane := components.Pane{
-		Title:  "Session",
-		Status: sessionStatus(model.snapshot.Phase),
-		State:  paneState(model.focus.Active() == focusSession),
-		Lines:  sessionLines,
+	coachPane := components.Pane{
+		Title:  "Coach",
+		Status: model.coachStatusLocked(),
+		State:  paneState(model.focus.Active() == focusCoach),
+		Lines:  coachLines,
 	}
 	var overlay *components.Pane
+	if model.coachOverlay {
+		copy := coachPane
+		copy.State = components.PaneOverlay
+		overlay = &copy
+	}
 	if model.helpOpen {
 		help := components.Pane{
 			Title: "快捷键",
@@ -87,7 +99,7 @@ func (model *Model) Render() (string, error) {
 		} else {
 			mainPane = help
 			tracePane.State = components.PaneInactive
-			sessionPane.State = components.PaneInactive
+			coachPane.State = components.PaneInactive
 		}
 	}
 	shell := components.AppShell{
@@ -98,7 +110,7 @@ func (model *Model) Render() (string, error) {
 		ActivitySummary: model.activitySummaryLocked(traceItems),
 		Trace:           tracePane,
 		Main:            mainPane,
-		Coach:           sessionPane,
+		Coach:           coachPane,
 		Overlay:         overlay,
 		Commands:        model.commandsLocked(),
 		Theme:           model.Theme,
@@ -367,62 +379,19 @@ func (model *Model) confirmLinesLocked(width int) []string {
 	return []string{line}
 }
 
-func (model *Model) sessionLinesLocked(width int) []string {
-	timer := model.timerLocked()
-	lines := []string{
-		components.SectionLabel{
-			Text: "Question timer",
-			Kind: components.LabelInfo,
-		}.Render(model.Theme),
-		timer.Render(model.Theme),
-		"state: " + sessionStatus(model.snapshot.Phase),
-		"",
-		components.SectionLabel{
-			Text: "Scenario",
-			Kind: components.LabelDefault,
-		}.Render(model.Theme),
-		"template: " + oneLine(model.snapshot.Scenario.Template),
-		"mode: " + modeLabel(model.snapshot.Scenario.Mode),
-	}
-	if question := model.snapshot.CurrentQuestion; question != nil {
-		lines = append(lines,
-			fmt.Sprintf(
-				"question: %d/%d",
-				model.snapshot.CurrentIndex+1,
-				len(model.snapshot.Scenario.Questions),
-			),
-			fmt.Sprintf(
-				"follow-ups: %d/%d",
-				model.snapshot.FollowUpCount,
-				question.MaxFollowUps,
-			),
-			"intent: "+oneLine(question.Intent),
-			"source: "+questionSource(*question),
-			"close: "+oneLine(question.EndCondition),
-		)
-	}
-	lines = append(lines,
-		"",
-		components.SectionLabel{
-			Text: "Session controls",
-			Kind: components.LabelWarning,
-		}.Render(model.Theme),
-		"[p] 暂停/恢复",
-		"[x] 结束本题",
-		"[q] 结束面试",
-	)
-	return truncateScreenLines(lines, width, model.Theme.UseASCII)
-}
-
 func (model *Model) commandsLocked() []components.KeyHint {
 	if model.helpOpen {
 		return []components.KeyHint{
 			{Key: "Esc", Action: "返回", Enabled: true},
 		}
 	}
+	if model.focus.Active() == focusCoach {
+		return model.coachCommandsLocked()
+	}
 	if model.isBusyLocked() {
 		return []components.KeyHint{
 			{Key: "Esc", Action: "停止等待", Enabled: true},
+			{Key: "c", Action: "查看 Coach", Enabled: true},
 		}
 	}
 	if model.snapshot.PendingEnd != nil {
@@ -452,12 +421,14 @@ func (model *Model) commandsLocked() []components.KeyHint {
 			},
 			{Key: "x", Action: "结束本题", Enabled: true},
 			{Key: "q", Action: "结束面试", Enabled: true},
+			{Key: "c", Action: "Coach", Enabled: true},
 			{Key: "?", Action: "快捷键", Enabled: true},
 		}
 	}
 	if model.snapshot.Phase == coreinterview.PhasePaused {
 		return []components.KeyHint{
 			{Key: "p", Action: "恢复", Enabled: true},
+			{Key: "c", Action: "Coach", Enabled: true},
 			{Key: "q", Action: "结束面试", Enabled: true},
 			{Key: "?", Action: "快捷键", Enabled: true},
 		}
@@ -469,6 +440,7 @@ func (model *Model) commandsLocked() []components.KeyHint {
 			Enabled: strings.TrimSpace(model.draft) != "",
 		},
 		{Key: "p", Action: "暂停", Enabled: true},
+		{Key: "c", Action: "Coach", Enabled: true},
 		{Key: "x", Action: "结束本题", Enabled: true},
 		{Key: "q", Action: "结束面试", Enabled: true},
 		{Key: "Tab", Action: "切换区域", Enabled: true},
@@ -480,8 +452,9 @@ func (model *Model) helpLinesLocked() []string {
 	return []string{
 		"INTERVIEW ROOM",
 		"[Ctrl+Enter] 提交当前回答；[Enter] 只换行",
-		"[Tab/Shift+Tab] 切换回答、Trace 与 Session",
+		"[Tab/Shift+Tab] 切换回答、Trace 与 Coach",
 		"[↑/↓] 阅读不可编辑的 Answer Trace",
+		"[c] 打开 Coach；窄屏以 overlay 显示",
 		"[p] 暂停/恢复 · [x] 结束本题 · [q] 结束面试",
 		"[Esc] 停止等待、取消确认或关闭帮助",
 		"",
@@ -528,7 +501,11 @@ func (model *Model) composerDisabledReasonLocked() string {
 }
 
 func (model *Model) traceItemsLocked() []components.TraceItem {
-	items := make([]components.TraceItem, 0, len(model.snapshot.Events))
+	items := make(
+		[]components.TraceItem,
+		0,
+		len(model.snapshot.Events)+len(model.coachHistory),
+	)
 	for _, event := range model.snapshot.Events {
 		kind, label := traceIdentity(model.snapshot, event)
 		items = append(items, components.TraceItem{
@@ -539,6 +516,29 @@ func (model *Model) traceItemsLocked() []components.TraceItem {
 			Summary: event.Content,
 		})
 	}
+	for _, event := range model.coachHistory {
+		summary := string(event.HelpLevel)
+		if len(event.Tags) > 0 {
+			summary += " · " + strings.Join(event.Tags, ",")
+		}
+		items = append(items, components.TraceItem{
+			ID:      event.ID,
+			At:      event.OccurredAt,
+			Kind:    components.TraceCoach,
+			Label:   "coach " + string(event.HelpLevel),
+			Summary: summary,
+		})
+	}
+	slices.SortStableFunc(items, func(left, right components.TraceItem) int {
+		switch {
+		case left.At.Before(right.At):
+			return -1
+		case left.At.After(right.At):
+			return 1
+		default:
+			return strings.Compare(left.ID, right.ID)
+		}
+	})
 	return items
 }
 
@@ -768,31 +768,6 @@ func sessionStatus(phase coreinterview.Phase) string {
 	}
 }
 
-func modeLabel(mode contracts.ScenarioMode) string {
-	switch mode {
-	case contracts.ScenarioStrict:
-		return "strict"
-	case contracts.ScenarioCoach:
-		return "coach"
-	default:
-		return "standard"
-	}
-}
-
-func questionSource(question contracts.ScenarioQuestion) string {
-	if question.Generic {
-		return "generic"
-	}
-	if len(question.EvidenceIDs) == 0 {
-		return "evidence unavailable"
-	}
-	values := make([]string, len(question.EvidenceIDs))
-	for index, id := range question.EvidenceIDs {
-		values[index] = string(id)
-	}
-	return strings.Join(values, ",")
-}
-
 func questionLabel(
 	snapshot coreinterview.Snapshot,
 	questionID string,
@@ -827,10 +802,6 @@ func paneState(focused bool) components.PaneState {
 	return components.PaneInactive
 }
 
-func oneLine(value string) string {
-	return strings.Join(strings.Fields(value), " ")
-}
-
 func fitScreenLines(lines []string, height int) []string {
 	if height <= 0 {
 		return nil
@@ -842,16 +813,4 @@ func fitScreenLines(lines []string, height int) []string {
 		lines = append(lines, "")
 	}
 	return lines
-}
-
-func truncateScreenLines(
-	lines []string,
-	width int,
-	ascii bool,
-) []string {
-	result := make([]string, len(lines))
-	for index, line := range lines {
-		result[index] = layout.TruncateRight(line, width, ascii)
-	}
-	return result
 }
