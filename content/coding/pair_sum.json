@@ -1,0 +1,51 @@
+{
+  "id": "pair_sum",
+  "title": "Pair Sum Indices",
+  "description": "Given an array of integers and a target, return the indices of two distinct elements whose values add up to the target. Exactly one valid pair exists.",
+  "input_format": "Function arguments: nums is an integer array and target is an integer.",
+  "output_format": "Return a two-element integer array [i, j] with i < j and nums[i] + nums[j] = target.",
+  "constraints": [
+    "2 <= nums.length <= 100000",
+    "-1000000000 <= nums[i], target <= 1000000000",
+    "Exactly one valid pair exists and one element cannot be reused"
+  ],
+  "examples": [
+    {
+      "input": "nums = [2, 7, 11, 15], target = 9",
+      "output": "[0, 1]",
+      "explanation": "nums[0] + nums[1] = 2 + 7 = 9."
+    },
+    {
+      "input": "nums = [3, 2, 4], target = 6",
+      "output": "[1, 2]",
+      "explanation": "The distinct values at indices 1 and 2 sum to 6."
+    }
+  ],
+  "target_complexity": {
+    "time": "O(n)",
+    "space": "O(n)"
+  },
+  "rubric": [
+    {
+      "dimension": "clarification",
+      "description": "Confirms the unique-solution and distinct-index guarantees before coding."
+    },
+    {
+      "dimension": "correctness",
+      "description": "Returns the two valid indices without reusing an element."
+    },
+    {
+      "dimension": "complexity",
+      "description": "Uses a single pass with a value-to-index map and explains O(n) time and space."
+    },
+    {
+      "dimension": "communication",
+      "description": "Explains the complement invariant and relevant edge cases."
+    }
+  ],
+  "templates": {
+    "python": "from typing import List\n\n\ndef pair_sum(nums: List[int], target: int) -> List[int]:\n    # Explain the invariant before implementing.\n    pass\n",
+    "javascript": "/**\n * @param {number[]} nums\n * @param {number} target\n * @returns {number[]}\n */\nfunction pairSum(nums, target) {\n  // Explain the invariant before implementing.\n}\n",
+    "java": "import java.util.*;\n\nclass Solution {\n    public int[] pairSum(int[] nums, int target) {\n        // Explain the invariant before implementing.\n        return new int[0];\n    }\n}\n"
+  }
+}
