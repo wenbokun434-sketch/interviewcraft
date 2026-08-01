@@ -97,6 +97,54 @@ func (s *Store) LoadTrainingHome(
 	}, nil
 }
 
+// DeleteReport removes one report payload by its session and report IDs. The
+// learning map is embedded in the payload and Practice Queue is derived from
+// the reports table, so both disappear from subsequent queries atomically.
+func (s *Store) DeleteReport(
+	ctx context.Context,
+	sessionID string,
+	reportID string,
+) (bool, error) {
+	if s == nil || s.sql == nil {
+		return false, storageError(
+			"delete report",
+			"",
+			"重新打开本地数据目录后重试。",
+			errors.New("store is closed"),
+		)
+	}
+	if strings.TrimSpace(sessionID) == "" ||
+		strings.TrimSpace(reportID) == "" {
+		return false, invalidInput(
+			"delete report",
+			"会话 ID 和报告 ID 不能为空。",
+			nil,
+		)
+	}
+	transaction, err := s.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return false, s.trainingQueryError("begin report deletion", err)
+	}
+	defer transaction.Rollback()
+	result, err := transaction.ExecContext(
+		ctx,
+		`DELETE FROM reports WHERE session_id = ? AND id = ?`,
+		sessionID,
+		reportID,
+	)
+	if err != nil {
+		return false, s.trainingQueryError("delete report", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, s.trainingQueryError("read report deletion result", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return false, s.trainingQueryError("commit report deletion", err)
+	}
+	return affected == 1, nil
+}
+
 func (s *Store) loadRecentTraining(
 	ctx context.Context,
 	limit int,

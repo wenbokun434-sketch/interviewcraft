@@ -127,6 +127,62 @@ func TestLoadTrainingHomeToleratesUnavailableDerivedScore(t *testing.T) {
 	}
 }
 
+func TestDeleteReportRemovesLearningPayloadAndDerivedPracticeQueue(t *testing.T) {
+	store := openTestStore(t)
+	fixture := seedTrainingGraph(t, store)
+	payload := json.RawMessage(`{
+		"learning_map":[{"topic":"Redis consistency","ask_count":1}],
+		"practice_plan":[{
+			"topic":"Redis consistency",
+			"mode":"strict",
+			"duration_minutes":15,
+			"completion_criteria":"Explain one failure mode"
+		}]
+	}`)
+	if err := store.SaveReport(context.Background(), Report{
+		ID:        "report-delete",
+		SessionID: fixture.sessionID,
+		Payload:   payload,
+		CreatedAt: fixture.now,
+		UpdatedAt: fixture.now,
+	}); err != nil {
+		t.Fatalf("SaveReport: %v", err)
+	}
+	before, err := store.LoadTrainingHome(context.Background(), 5)
+	if err != nil || len(before.PracticeQueue) != 1 {
+		t.Fatalf("before delete queue=%#v err=%v", before.PracticeQueue, err)
+	}
+	deleted, err := store.DeleteReport(
+		context.Background(),
+		fixture.sessionID,
+		"report-delete",
+	)
+	if err != nil || !deleted {
+		t.Fatalf("DeleteReport deleted=%v err=%v", deleted, err)
+	}
+	if _, found, err := store.GetReport(
+		context.Background(),
+		fixture.sessionID,
+	); err != nil || found {
+		t.Fatalf("GetReport found=%v err=%v", found, err)
+	}
+	after, err := store.LoadTrainingHome(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("LoadTrainingHome after delete: %v", err)
+	}
+	if len(after.PracticeQueue) != 0 || after.Recent[0].ReportID != "" {
+		t.Fatalf("after delete home=%#v", after)
+	}
+	deleted, err = store.DeleteReport(
+		context.Background(),
+		fixture.sessionID,
+		"report-delete",
+	)
+	if err != nil || deleted {
+		t.Fatalf("repeat delete deleted=%v err=%v", deleted, err)
+	}
+}
+
 func TestLoadTrainingHomeClosedSQLiteReturnsActionableError(t *testing.T) {
 	store, err := Open(
 		context.Background(),
