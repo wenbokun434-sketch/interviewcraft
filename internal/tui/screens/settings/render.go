@@ -10,6 +10,7 @@ import (
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
 	"github.com/interviewcraft/interviewcraft/internal/tui/components"
 	"github.com/interviewcraft/interviewcraft/internal/tui/layout"
+	"github.com/interviewcraft/interviewcraft/internal/tui/theme"
 )
 
 // Render draws P-07 without exposing API key values or references.
@@ -18,6 +19,12 @@ func (model *Model) Render() (string, error) {
 		return "", fmt.Errorf("settings model is nil")
 	}
 	if err := model.connection.Validate(); err != nil {
+		return "", err
+	}
+	if err := model.dataState.Validate(); err != nil {
+		return "", err
+	}
+	if err := model.dataOperation.Validate(); err != nil {
 		return "", err
 	}
 	plan := layout.Calculate(model.Width, model.Height)
@@ -34,12 +41,37 @@ func (model *Model) Render() (string, error) {
 		return "", err
 	}
 	runtimeLines := model.runtimeLines()
+	dataWidth := max(1, plan.CoachWidth-2)
+	if plan.Mode == layout.Narrow || plan.Mode == layout.Blocked {
+		dataWidth = mainWidth
+	}
+	dataLines, err := model.dataLines(dataWidth)
+	if err != nil {
+		return "", err
+	}
+	sideLines := append([]string{}, runtimeLines...)
+	sideLines = append(sideLines, components.SectionLabel{
+		Text: "Data vault",
+		Kind: components.LabelInfo,
+	}.Render(model.Theme))
+	sideLines = append(sideLines, dataLines...)
 	if plan.Mode == layout.Narrow {
-		providerLines = append(providerLines, "")
-		providerLines = append(providerLines, components.SectionLabel{
-			Text: "Local runtime",
-		}.Render(model.Theme))
-		providerLines = append(providerLines, model.runtimeLines()...)
+		switch model.focus.Active() {
+		case focusData:
+			providerLines = append([]string{components.SectionLabel{
+				Text: "Data vault", Kind: components.LabelInfo,
+			}.Render(model.Theme)}, dataLines...)
+		case focusRuntime:
+			providerLines = append([]string{components.SectionLabel{
+				Text: "Local runtime",
+			}.Render(model.Theme)}, runtimeLines...)
+		default:
+			providerLines = append(providerLines, "")
+			providerLines = append(providerLines, components.SectionLabel{
+				Text: "Local runtime",
+			}.Render(model.Theme))
+			providerLines = append(providerLines, runtimeLines...)
+		}
 	}
 
 	trace := components.Pane{
@@ -60,18 +92,45 @@ func (model *Model) Render() (string, error) {
 		Lines:  providerLines,
 	}
 	local := components.Pane{
-		Title: "Local runtime",
-		State: paneState(model.focus.Active() == focusRuntime),
-		Lines: runtimeLines,
+		Title: "Local runtime / Data",
+		State: paneState(
+			model.focus.Active() == focusRuntime || model.focus.Active() == focusData,
+		),
+		Lines: sideLines,
 	}
 	var overlay *components.Pane
-	if model.helpOpen {
+	if model.dataConfirmOpen {
+		message := "删除全部本地训练数据？"
+		if model.pendingDelete == "session" {
+			message = "删除单场训练 " + model.pendingSessionID + "？"
+		}
+		prompt := components.ConfirmPrompt{
+			Message: message,
+			Confirm: components.KeyHint{Key: "y", Action: "确认删除"},
+			Cancel:  components.KeyHint{Key: "Esc", Action: "保留数据"},
+		}
+		confirmation := components.Pane{
+			Title: "Confirm data deletion",
+			State: components.PaneOverlay,
+			Lines: []string{
+				model.Theme.Paint(theme.Warning, "删除在单个 SQLite 事务中执行，无法撤销。"),
+				prompt.Render(model.Theme, mainWidth),
+			},
+		}
+		if plan.Mode == layout.Narrow {
+			overlay = &confirmation
+		} else {
+			main = confirmation
+			local.State = components.PaneInactive
+		}
+	} else if model.helpOpen {
 		help := components.Pane{
 			Title: "快捷键",
 			State: components.PaneOverlay,
 			Lines: []string{
 				"[t] 测试连接 · [e] 编辑 Provider · [w] 保存",
 				"[Tab] 切换区域 · [h] 训练主页 · [s] 设置",
+				"Data: [e] 导出 · [i] 导入 · [c] Coach 原文 · [d/x] 删除",
 				"[Esc] 返回之前的焦点",
 			},
 		}
@@ -95,6 +154,102 @@ func (model *Model) Render() (string, error) {
 		Theme:           model.Theme,
 	}
 	return shell.Render()
+}
+
+func (model *Model) dataLines(width int) ([]string, error) {
+	lines := make([]string, 0, 16)
+	switch model.dataState.Phase {
+	case async.Pending:
+		line, err := (components.ActivityLine{
+			State: async.NewPending[string](),
+			Label: "正在读取本地数据清单",
+		}).Render(model.Theme, width)
+		return []string{line}, err
+	case async.Streaming:
+		stage := "正在刷新本地数据清单"
+		line, err := (components.ActivityLine{
+			State: async.NewStreaming(&stage), Label: stage,
+		}).Render(model.Theme, width)
+		return []string{line}, err
+	case async.Failed:
+		notice := components.ErrorNotice(
+			model.dataState.Err,
+			&components.KeyHint{Key: "l", Action: "重试", Enabled: true},
+		)
+		return notice.Render(model.Theme, width)
+	case async.Succeeded:
+		inventory := model.dataState.Value
+		if inventory == nil {
+			return nil, fmt.Errorf("succeeded data inventory is nil")
+		}
+		if inventory.Profiles == 0 && inventory.Scenarios == 0 &&
+			inventory.Sessions == 0 && inventory.Reports == 0 {
+			lines = append(lines,
+				model.Theme.Paint(theme.Info, "还没有本地训练数据"),
+				"[i] 从迁移包恢复；导出会保持禁用。",
+			)
+		} else {
+			lines = append(lines,
+				fmt.Sprintf(
+					"画像 %d · 场景 %d · 会话 %d · 报告 %d",
+					inventory.Profiles,
+					inventory.Scenarios,
+					inventory.Sessions,
+					inventory.Reports,
+				),
+				fmt.Sprintf("Coach 学习事件 %d", inventory.CoachItems),
+			)
+			items := make([]components.ListItem, 0, len(inventory.SessionIDs))
+			for _, sessionID := range inventory.SessionIDs {
+				items = append(items, components.ListItem{
+					ID: sessionID, Label: sessionID, Meta: "report/export/delete scope",
+				})
+			}
+			lines = append(lines, components.SelectableList{
+				Items: items, Selected: model.selectedSession,
+				Focused:      model.focus.Active() == focusData,
+				EmptyMessage: "还没有会话",
+			}.Render(model.Theme, width, min(4, max(2, len(items))))...)
+		}
+	}
+	privacy := "excluded (default)"
+	if model.includeCoachContent {
+		privacy = "included (explicit)"
+	}
+	lines = append(lines,
+		"",
+		"Coach transcript  "+privacy,
+		"Provider secrets  never exported",
+	)
+	if model.dataOperation.Phase == async.Pending ||
+		model.dataOperation.Phase == async.Streaming {
+		label := "正在执行本地数据操作"
+		if model.dataOperation.Value != nil && model.dataOperation.Value.Message != "" {
+			label = model.dataOperation.Value.Message
+		}
+		state := async.NewPending[string]()
+		if model.dataOperation.Phase == async.Streaming {
+			state = async.NewStreaming(&label)
+		}
+		line, err := (components.ActivityLine{State: state, Label: label}).Render(model.Theme, width)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, "", line)
+	}
+	if model.dataOperation.Phase == async.Failed {
+		notice := components.ErrorNotice(
+			model.dataOperation.Err,
+			&components.KeyHint{Key: "l", Action: "刷新清单", Enabled: true},
+		)
+		rendered, err := notice.Render(model.Theme, width)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, "")
+		lines = append(lines, rendered...)
+	}
+	return lines, nil
 }
 
 func (model *Model) providerLines(width int) ([]string, error) {
@@ -252,9 +407,25 @@ func (model *Model) providerStatus() string {
 }
 
 func (model *Model) commands() []components.KeyHint {
+	if model.dataConfirmOpen {
+		return []components.KeyHint{
+			{Key: "y", Action: "确认删除", Enabled: true},
+			{Key: "Esc", Action: "保留数据", Enabled: true},
+		}
+	}
 	if model.helpOpen {
 		return []components.KeyHint{
 			{Key: "Esc", Action: "返回", Enabled: true},
+		}
+	}
+	if model.focus.Active() == focusData {
+		return []components.KeyHint{
+			{Key: "e", Action: "导出", Enabled: model.hasLocalData()},
+			{Key: "i", Action: "导入", Enabled: !model.hasLocalData()},
+			{Key: "c", Action: "Coach 原文", Enabled: true},
+			{Key: "d", Action: "删除单场", Enabled: model.selectedSessionID() != ""},
+			{Key: "x", Action: "删除全部", Enabled: model.hasLocalData()},
+			{Key: "?", Action: "快捷键", Enabled: true},
 		}
 	}
 	return []components.KeyHint{

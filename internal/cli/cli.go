@@ -4,14 +4,20 @@ package cli
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/interviewcraft/interviewcraft/internal/config"
+	"github.com/interviewcraft/interviewcraft/internal/core/async"
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
+	"github.com/interviewcraft/interviewcraft/internal/core/transfer"
 	"github.com/interviewcraft/interviewcraft/internal/db"
 	"github.com/interviewcraft/interviewcraft/internal/doctor"
 	"github.com/interviewcraft/interviewcraft/internal/tui/screens/training"
@@ -39,8 +45,8 @@ var commands = []command{
 	{name: "init", description: "Initialize a local Lite workspace"},
 	{name: "run", description: "Start the InterviewCraft terminal UI"},
 	{name: "doctor", description: "Check local runtime dependencies"},
-	{name: "export", description: "Export local training data", task: "T-018"},
-	{name: "import", description: "Import a local transfer package", task: "T-018"},
+	{name: "export", description: "Export reports or local training data"},
+	{name: "import", description: "Import a local transfer package"},
 }
 
 // Run handles one InterviewCraft command and returns a process exit code.
@@ -59,7 +65,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			writeCommandHelp(stdout, candidate)
 			return ExitOK
 		}
-		if len(args) > 1 && candidate.name != "run" {
+		if len(args) > 1 &&
+			candidate.name != "run" &&
+			candidate.name != "export" &&
+			candidate.name != "import" {
 			fmt.Fprintf(
 				stderr,
 				"命令 %q 不接受参数 %q。\n运行 `interviewcraft %s --help` 查看用法。\n",
@@ -77,6 +86,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			return runTraining(args[1:], stdout, stderr)
 		case "doctor":
 			return runDoctor(stdout, stderr)
+		case "export":
+			return runExport(args[1:], stdout, stderr)
+		case "import":
+			return runImport(args[1:], stdout, stderr)
 		default:
 			fmt.Fprintf(
 				stderr,
@@ -127,11 +140,178 @@ func writeCommandHelp(output io.Writer, target command) {
 		fmt.Fprintln(output, "  --ansi-16")
 		fmt.Fprintln(output, "  --no-color")
 	}
+	if target.name == "export" {
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "Options:")
+		fmt.Fprintln(output, "  --format package|json|markdown")
+		fmt.Fprintln(output, "  --output <new-file>")
+		fmt.Fprintln(output, "  --session <id>       Required for json/markdown")
+		fmt.Fprintln(output, "  --include-coach      Explicitly include Coach transcript text")
+	}
+	if target.name == "import" {
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "Options:")
+		fmt.Fprintln(output, "  --input <transfer-package>")
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "Import requires an empty initialized Lite instance.")
+	}
 	if target.task == "" {
 		fmt.Fprintln(output, "Status: available.")
 		return
 	}
 	fmt.Fprintf(output, "Status: planned for TODO %s.\n", target.task)
+}
+
+func runExport(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("export", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	formatValue := flags.String("format", string(transfer.FormatPackage), "export format")
+	outputPath := flags.String("output", "", "new output file")
+	sessionID := flags.String("session", "", "report session id")
+	includeCoach := flags.Bool("include-coach", false, "include Coach transcript")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "! 无法解析 export 选项。")
+		fmt.Fprintln(stderr, "  运行 `interviewcraft export --help` 查看用法。")
+		return ExitUsage
+	}
+	format := transfer.Format(strings.ToLower(strings.TrimSpace(*formatValue)))
+	service, paths, err := transferService()
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	target := strings.TrimSpace(*outputPath)
+	if target == "" {
+		target = defaultExportPath(paths.Exports, format, *sessionID)
+	}
+	result, err := service.Export(context.Background(), transfer.ExportOptions{
+		Format: format, OutputPath: target, SessionID: strings.TrimSpace(*sessionID),
+		IncludeCoachContent: *includeCoach,
+	}, transferProgress(stdout))
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	fmt.Fprintf(stdout, "✓ 已导出 %s（%d 条记录）。\n", result.Path, result.RecordCount)
+	if !*includeCoach {
+		fmt.Fprintln(stdout, "  Coach 原文未包含；使用 --include-coach 可显式选择包含。")
+	}
+	return ExitOK
+}
+
+func runImport(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("import", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	inputPath := flags.String("input", "", "transfer package")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "! 无法解析 import 选项。")
+		fmt.Fprintln(stderr, "  运行 `interviewcraft import --help` 查看用法。")
+		return ExitUsage
+	}
+	if strings.TrimSpace(*inputPath) == "" {
+		fmt.Fprintln(stderr, "! import 需要 --input <transfer-package>。")
+		fmt.Fprintln(stderr, "  运行 `interviewcraft import --help` 查看用法。")
+		return ExitUsage
+	}
+	service, _, err := transferService()
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	result, err := service.Import(
+		context.Background(),
+		*inputPath,
+		transferProgress(stdout),
+	)
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	fmt.Fprintf(
+		stdout,
+		"✓ 已恢复 %d 个画像、%d 场会话、%d 份报告。\n",
+		result.Profiles,
+		result.Sessions,
+		result.Reports,
+	)
+	return ExitOK
+}
+
+func transferService() (*transfer.Service, db.Paths, error) {
+	runtime, metadata, err := config.LoadOS()
+	if err != nil {
+		return nil, db.Paths{}, err
+	}
+	if !metadata.Exists {
+		return nil, db.Paths{}, domainerr.New(
+			domainerr.CodeInvalidState,
+			"open transfer command",
+			"尚未初始化 Lite 配置。",
+			"运行 `interviewcraft init` 后重试。",
+			false,
+		)
+	}
+	store, err := db.Open(context.Background(), db.Config{
+		DataDir: runtime.DataDir, DatabaseName: runtime.DatabaseName,
+	}, nil)
+	if err != nil {
+		return nil, db.Paths{}, err
+	}
+	paths := store.Paths()
+	if err := store.Close(); err != nil {
+		return nil, db.Paths{}, domainerr.Wrap(
+			domainerr.CodePersistenceFailed,
+			"prepare transfer command",
+			"SQLite",
+			"无法安全准备本地迁移存储。",
+			"检查数据库文件后重试。",
+			true,
+			err,
+		)
+	}
+	return transfer.NewService(paths.Database, transfer.Options{}), paths, nil
+}
+
+func transferProgress(output io.Writer) transfer.Observer {
+	return func(state async.State[transfer.Progress]) {
+		if state.Phase != async.Streaming || state.Value == nil {
+			return
+		}
+		fmt.Fprintf(
+			output,
+			"· [%d/%d] %s\n",
+			state.Value.Current,
+			state.Value.Total,
+			state.Value.Message,
+		)
+	}
+}
+
+func defaultExportPath(exportsDir string, format transfer.Format, sessionID string) string {
+	name := "interviewcraft-transfer.json"
+	if format == transfer.FormatJSON {
+		name = "report-" + safeFilePart(sessionID) + ".json"
+	}
+	if format == transfer.FormatMarkdown {
+		name = "report-" + safeFilePart(sessionID) + ".md"
+	}
+	return filepath.Join(exportsDir, name)
+}
+
+func safeFilePart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "session"
+	}
+	var result strings.Builder
+	for _, char := range value {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '-' || char == '_' {
+			result.WriteRune(char)
+		} else {
+			result.WriteRune('-')
+		}
+	}
+	return result.String()
 }
 
 func runTraining(args []string, stdout, stderr io.Writer) int {

@@ -2,13 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/interviewcraft/interviewcraft/internal/core/contracts"
+	"github.com/interviewcraft/interviewcraft/internal/db"
 	"github.com/interviewcraft/interviewcraft/internal/tui/layout"
 )
 
@@ -61,24 +65,118 @@ func TestRunWithoutConfigurationShowsHelp(t *testing.T) {
 	}
 }
 
-func TestRunKnownPlaceholderIsActionable(t *testing.T) {
-	t.Parallel()
-
+func TestRunExportWithoutInitIsActionable(t *testing.T) {
+	t.Setenv("INTERVIEWCRAFT_DATA_DIR", filepath.Join(t.TempDir(), "missing"))
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
 	code := Run([]string{"export"}, &stdout, &stderr)
 
-	if code != ExitUnavailable {
-		t.Fatalf("Run(export) exit code = %d, want %d", code, ExitUnavailable)
+	if code != ExitFailure {
+		t.Fatalf("Run(export) exit code = %d, want %d", code, ExitFailure)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("Run(export) stdout = %q, want empty", stdout.String())
 	}
-	for _, expected := range []string{"尚未实现", "T-018", "interviewcraft --help"} {
+	for _, expected := range []string{"尚未初始化", "interviewcraft init"} {
 		if !strings.Contains(stderr.String(), expected) {
 			t.Errorf("Run(export) stderr = %q, want %q", stderr.String(), expected)
 		}
+	}
+}
+
+func TestRunExportImportRoundTrip(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	t.Setenv("INTERVIEWCRAFT_DATA_DIR", sourceDir)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Run([]string{"init"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("source init exit=%d stderr=%q", code, stderr.String())
+	}
+	store, err := db.Open(context.Background(), db.Config{DataDir: sourceDir}, nil)
+	if err != nil {
+		t.Fatalf("Open source: %v", err)
+	}
+	now := time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC)
+	profile := contracts.CandidateProfile{
+		TargetRole: "Backend Engineer",
+		Facts: []contracts.ProfileFact{{
+			ID: "fact-cli", Field: "project", Value: "CLI migration",
+			SourceSpan: contracts.SourceSpan{Start: 0, End: 13, Text: "CLI migration"},
+		}},
+		Inferences: []contracts.ProfileInference{},
+		Projects:   []string{"CLI migration"}, Skills: []string{"Go"},
+	}
+	if err := store.SaveProfile(context.Background(), "profile-cli", profile, &now); err != nil {
+		_ = store.Close()
+		t.Fatalf("SaveProfile: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close source: %v", err)
+	}
+
+	packagePath := filepath.Join(t.TempDir(), "cli-transfer.json")
+	stdout.Reset()
+	stderr.Reset()
+	code := Run([]string{
+		"export", "--format", "package", "--output", packagePath,
+	}, &stdout, &stderr)
+	if code != ExitOK || stderr.Len() != 0 {
+		t.Fatalf("export exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{"[1/4]", "[3/4]", "已导出", "Coach 原文未包含"} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("export output missing %q", expected)
+		}
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "target")
+	t.Setenv("INTERVIEWCRAFT_DATA_DIR", targetDir)
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"init"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("target init exit=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = Run([]string{"import", "--input", packagePath}, &stdout, &stderr)
+	if code != ExitOK || stderr.Len() != 0 {
+		t.Fatalf("import exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for _, expected := range []string{"[1/6]", "[5/6]", "已恢复 1 个画像"} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("import output missing %q", expected)
+		}
+	}
+	target, err := db.Open(context.Background(), db.Config{DataDir: targetDir}, nil)
+	if err != nil {
+		t.Fatalf("Open target: %v", err)
+	}
+	defer target.Close()
+	restored, found, err := target.GetProfile(context.Background(), "profile-cli")
+	if err != nil || !found || restored.TargetRole != profile.TargetRole {
+		t.Fatalf("restored=%#v found=%v err=%v", restored, found, err)
+	}
+}
+
+func TestRunTransferHelpAndUsage(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Run([]string{"export", "--help"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("export help exit=%d", code)
+	}
+	for _, expected := range []string{"--format package|json|markdown", "--include-coach", "Status: available"} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Errorf("export help missing %q", expected)
+		}
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run([]string{"import"}, &stdout, &stderr); code != ExitUsage {
+		t.Fatalf("import without input exit=%d", code)
+	}
+	if !strings.Contains(stderr.String(), "--input") {
+		t.Fatalf("import stderr=%q", stderr.String())
 	}
 }
 

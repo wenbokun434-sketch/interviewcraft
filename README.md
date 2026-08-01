@@ -9,10 +9,9 @@ Implementation order and acceptance gates live in [`TODO.md`](TODO.md).
 
 ## Current status
 
-The Lite runtime can now initialize its local SQLite workspace and diagnose the
-terminal, data directory, database, model endpoint, and optional Docker runner.
-The `run`, `export`, and `import` commands remain visible placeholders until
-their ordered TODO tasks are completed.
+The Lite runtime can initialize its local SQLite workspace, render the terminal
+training flow, diagnose local dependencies, export reports or a migration
+package, and restore that package into an empty Lite instance.
 
 Lite mode will not require Node.js, Docker, PostgreSQL, Redis, a message queue,
 or any other resident service. Docker remains an optional code-runner
@@ -62,3 +61,33 @@ file or diagnostic output.
 | `INTERVIEWCRAFT_LLM_API_KEY_ENV` | Name of the environment variable containing the API key | `OPENAI_API_KEY` |
 | `RUNNER_MODE` | `disabled` or `docker` | `disabled` |
 | `AUDIO_PROVIDER` | Audio provider selector | `browser` |
+
+## Export and restore local data
+
+Create a complete migration package. Coach transcript text is excluded unless
+the explicit privacy option is supplied, and Provider configuration or secrets
+are never included:
+
+```powershell
+.\interviewcraft.exe export --format package --output .\interviewcraft-transfer.json
+.\interviewcraft.exe export --format package --include-coach --output .\with-coach.json
+```
+
+Export one completed report as Markdown or strict JSON:
+
+```powershell
+.\interviewcraft.exe export --format markdown --session <session-id> --output .\report.md
+.\interviewcraft.exe export --format json --session <session-id> --output .\report.json
+```
+
+Restore a migration package into an initialized instance that contains no
+training data. Import validates the package version, IDs, report evidence, and
+foreign-key graph before committing the entire restore in one transaction:
+
+```powershell
+.\interviewcraft.exe init
+.\interviewcraft.exe import --input .\interviewcraft-transfer.json
+```
+
+Export never overwrites an existing file. Use a new output path when preserving
+multiple snapshots.
