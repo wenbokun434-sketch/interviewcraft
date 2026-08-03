@@ -1,0 +1,51 @@
+version: 2
+
+project_name: interviewcraft
+
+before:
+  hooks:
+    - go mod verify
+
+builds:
+  - id: interviewcraft
+    main: ./cmd/interviewcraft
+    binary: interviewcraft
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - ids:
+      - interviewcraft
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - docs/DEPLOYMENT.md
+      - docs/SECURITY.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'

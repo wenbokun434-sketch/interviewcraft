@@ -1,0 +1,35 @@
+name: quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lite-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: go.sum
+      - name: Run Lite quality gates
+        shell: pwsh
+        run: ./scripts/test-release-quality.ps1 -SkipRunnerIsolation
+
+  runner-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: go.sum
+      - name: Run Docker isolation attacks
+        shell: pwsh
+        run: ./scripts/test-runner-isolation.ps1
