@@ -1,171 +1,696 @@
 # InterviewCraft
 
-InterviewCraft is a local-first terminal application for evidence-based interview practice. It turns a confirmed resume into a scenario, text interview, policy-bound Coach session, optional coding exercise, evidence-linked report, and next practice run.
+InterviewCraft 是一款本地优先、面向终端的面试训练工具。它以候选人确认过的简历事实为基础，组织训练场景、文字面试、分级 Coach 提示、可选代码练习、证据化报告以及下一轮训练计划。
 
-Lite is a single Go binary backed by embedded SQLite and a model Provider. Docker is optional and `RUNNER_MODE` defaults to `disabled`; Node.js, Java, Python, PostgreSQL, Redis, queues, object storage, and vector databases are not Lite dependencies.
+Lite 版本采用单个 Go 二进制文件和内嵌 SQLite：
 
-## Install a release binary
+- 默认不需要 Docker、Node.js、Java、Python 或外部数据库；
+- `RUNNER_MODE` 默认且必须保持为 `disabled`；
+- 支持 OpenAI-compatible 和 Ollama 模型服务；
+- 简历、草稿、训练记录、代码证据和报告默认保存在本机；
+- 报告中的结论必须关联持久化证据，证据不足时明确标记为“证据不足”。
 
-Download the archive and `checksums.txt` from [GitHub Releases](https://github.com/interviewcraft/interviewcraft/releases). Release archives are named `interviewcraft_<version>_<os>_<arch>`.
+项目公开地址：[github.com/wenbokun434-sketch/interviewcraft](https://github.com/wenbokun434-sketch/interviewcraft)
 
-Windows PowerShell:
+## 目录
+
+- [当前实现状态](#当前实现状态)
+- [功能概览](#功能概览)
+- [运行要求](#运行要求)
+- [安装](#安装)
+- [五分钟快速开始](#五分钟快速开始)
+- [配置模型 Provider](#配置模型-provider)
+- [三种部署方式](#三种部署方式)
+- [命令行使用说明](#命令行使用说明)
+- [训练流程与键盘操作](#训练流程与键盘操作)
+- [本地数据目录](#本地数据目录)
+- [导出迁移与恢复](#导出迁移与恢复)
+- [启用 Docker Runner](#启用-docker-runner)
+- [升级与回滚](#升级与回滚)
+- [常见问题排查](#常见问题排查)
+- [从源码验证和发布](#从源码验证和发布)
+- [安全与隐私边界](#安全与隐私边界)
+- [贡献与许可证](#贡献与许可证)
+
+## 当前实现状态
+
+MVP 的领域服务、SQLite 持久化、P-01～P-07 屏幕模型、三语言 Runner、隔离攻击测试、证据化报告和完整 E2E 已实现并具有自动化测试。
+
+需要特别说明：当前命令行入口中的 `interviewcraft run` 会加载 SQLite、渲染一次训练主页到标准输出，然后退出；它尚未接入常驻终端事件循环。因此：
+
+- `init`、`doctor`、`run` 的单次渲染、`export` 和 `import` 可以直接使用；
+- 各训练屏幕的键盘交互和完整业务闭环目前由屏幕模型及 E2E 自动化验证；
+- 不应把当前二进制描述为已经可以从 `run` 中完成整场常驻交互训练。
+
+这一限制不会影响数据格式、部署方式、迁移命令或 Runner 隔离边界，但会影响最终用户通过单一命令进入完整交互流程。
+
+## 功能概览
+
+- 支持 PDF、DOCX、TXT 和粘贴文本的简历提取；
+- 将简历内容拆分为有原文位置的事实和待确认推断；
+- 根据已确认事实生成可编辑的训练场景；
+- 文字面试回答先落库，再调用 Interviewer Provider；
+- Coach 支持 L1～L4 分级提示、严格模式和上下文隔离；
+- 内置 Python、JavaScript、Java 三语言代码题模板；
+- Docker Runner 可执行公开测试和隐藏测试，但只暴露安全摘要；
+- 报告包含八个固定维度、逐题复盘、学习缺口和下一轮计划；
+- 支持 Markdown/JSON 报告导出和完整 Lite 数据迁移包；
+- 支持 160×48、120×36、80×24 三档终端布局，以及 ASCII、无颜色和减弱动效模式。
+
+## 运行要求
+
+| 项目 | Lite | Private Local | Full Practice |
+| --- | --- | --- | --- |
+| InterviewCraft 二进制 | 必需 | 必需 | 必需 |
+| SQLite | 已内嵌 | 已内嵌 | 已内嵌 |
+| 模型 Provider | 新建 AI 训练时必需 | 本地 Ollama | OpenAI-compatible 或 Ollama |
+| Docker | 不需要 | 不需要 | 仅代码执行需要 |
+| Node.js / Java / Python | 不需要 | 不需要 | 位于 Runner 镜像内，宿主不需要 |
+| 最小终端 | 80 列 × 24 行 | 80 列 × 24 行 | 80 列 × 24 行 |
+
+从源码构建需要 Go 1.26 或更高版本。Windows 下执行仓库脚本时，需要 PowerShell 7，或使用 Windows PowerShell 的 `-ExecutionPolicy Bypass` 参数。
+
+## 安装
+
+### 方式一：下载发行包
+
+如果 [Releases 页面](https://github.com/wenbokun434-sketch/interviewcraft/releases)已有构建产物，请同时下载平台压缩包和 `checksums.txt`。发行包命名格式为：
+
+```text
+interviewcraft_<版本>_<操作系统>_<架构>
+```
+
+Windows amd64：
 
 ```powershell
-Expand-Archive .\interviewcraft_<version>_windows_amd64.zip -DestinationPath .\interviewcraft
-Get-FileHash .\interviewcraft_<version>_windows_amd64.zip -Algorithm SHA256
+Get-FileHash .\interviewcraft_<版本>_windows_amd64.zip -Algorithm SHA256
+Expand-Archive .\interviewcraft_<版本>_windows_amd64.zip -DestinationPath .\interviewcraft
 .\interviewcraft\interviewcraft.exe --help
 ```
 
-Linux or macOS:
+Linux amd64：
 
 ```sh
-tar -xzf interviewcraft_<version>_<os>_<arch>.tar.gz
-sha256sum interviewcraft_<version>_<os>_<arch>.tar.gz
+sha256sum interviewcraft_<版本>_linux_amd64.tar.gz
+tar -xzf interviewcraft_<版本>_linux_amd64.tar.gz
 ./interviewcraft --help
 ```
 
-Compare the printed hash with `checksums.txt` before running the binary. With Go 1.26 or newer, source installation is also available:
+macOS arm64：
 
 ```sh
-go install github.com/interviewcraft/interviewcraft/cmd/interviewcraft@latest
+shasum -a 256 interviewcraft_<版本>_darwin_arm64.tar.gz
+tar -xzf interviewcraft_<版本>_darwin_arm64.tar.gz
+./interviewcraft --help
 ```
 
-## Quick start
+运行前应将计算出的 SHA-256 与 `checksums.txt` 对照。若 Releases 暂无附件，请使用源码构建。
 
-The supported terminal minimum is 80 columns by 24 rows. Initialization is idempotent and creates `config.json`, `interviewcraft.db`, `uploads/`, `exports/`, and `logs/` under `~/.interviewcraft` by default.
+### 方式二：从源码构建
+
+Windows PowerShell：
+
+```powershell
+git clone https://github.com/wenbokun434-sketch/interviewcraft.git
+Set-Location interviewcraft
+New-Item -ItemType Directory -Force .\bin | Out-Null
+go mod verify
+go build -trimpath -o .\bin\interviewcraft.exe .\cmd\interviewcraft
+.\bin\interviewcraft.exe --help
+```
+
+Linux 或 macOS：
+
+```sh
+git clone https://github.com/wenbokun434-sketch/interviewcraft.git
+cd interviewcraft
+mkdir -p bin
+go mod verify
+go build -trimpath -o ./bin/interviewcraft ./cmd/interviewcraft
+./bin/interviewcraft --help
+```
+
+仓库当前 `go.mod` 中的模块路径仍为 `github.com/interviewcraft/interviewcraft`，因此本文不建议使用个人仓库路径执行 `go install ...@latest`；直接克隆并构建最可靠。
+
+## 五分钟快速开始
+
+以下示例以 Windows PowerShell 为主。若二进制不在 `PATH`，请把 `interviewcraft` 替换为实际路径，例如 `.\bin\interviewcraft.exe`。
+
+### 1. 选择数据目录（可选）
+
+默认目录为当前用户主目录下的 `~/.interviewcraft`。也可以在第一次初始化前指定独立目录：
+
+```powershell
+$env:INTERVIEWCRAFT_DATA_DIR = "D:\InterviewCraftData"
+```
+
+### 2. 初始化 Lite
 
 ```powershell
 interviewcraft init
+```
+
+`init` 可以重复执行。它不会覆盖已有配置，会创建或迁移 SQLite，并准备上传、导出和日志目录。
+
+### 3. 配置模型 Provider
+
+使用 OpenAI-compatible 服务或 Ollama，具体示例见下一节。没有可用 Provider 时，历史数据和本地页面仍可读取，但不能创建依赖模型的新训练内容。
+
+### 4. 运行健康检查
+
+```powershell
 interviewcraft doctor
+```
+
+阻塞问题会返回非零退出码。Runner 未启用或 Docker 不可用只产生警告，不会阻止 Lite 的文字训练主链路。
+
+### 5. 渲染训练主页
+
+```powershell
 interviewcraft run
 ```
 
-`doctor` checks the data directory, embedded SQLite migrations, terminal size, model Provider, and optional Runner. Blocking failures return a non-zero exit code. A disabled or unavailable optional Docker Runner is a warning and does not block the Lite text-interview, Coach, or report path.
-
-Terminal capability flags can be combined when needed:
+兼容能力有限的终端可以使用：
 
 ```powershell
 interviewcraft run --ascii --reduce-motion --no-color
 ```
 
-The primary workflow is keyboard-operated. Run `interviewcraft --help` for commands and use `?` on a screen for its current shortcuts.
+如“当前实现状态”所述，现阶段该命令渲染一次主页后退出。
 
-## Configure a model Provider
+<a id="configure-a-model-provider"></a>
 
-InterviewCraft supports OpenAI-compatible endpoints and Ollama. API key values remain in process environment variables: configuration stores only the name of the variable to read.
+## 配置模型 Provider
 
-OpenAI-compatible example:
+InterviewCraft 支持两种 Provider 类型：
+
+- `openai-compatible`：兼容 OpenAI `/models` 和 `/chat/completions` 风格的服务；
+- `ollama`：使用 Ollama `/api/tags` 和 `/api/chat` 接口。
+
+API Key 的值只从进程环境变量读取。`config.json` 保存的是“密钥所在环境变量的名称”，不会保存密钥值。
+
+### OpenAI-compatible：Windows PowerShell
 
 ```powershell
 $env:INTERVIEWCRAFT_LLM_PROVIDER = "openai-compatible"
 $env:INTERVIEWCRAFT_LLM_ENDPOINT = "https://provider.example/v1"
 $env:INTERVIEWCRAFT_LLM_MODEL = "model-name"
 $env:INTERVIEWCRAFT_LLM_API_KEY_ENV = "INTERVIEWCRAFT_API_KEY"
-$env:INTERVIEWCRAFT_API_KEY = "<secret>"
+$env:INTERVIEWCRAFT_API_KEY = "<你的密钥>"
+
 interviewcraft doctor
 ```
 
-Local Ollama example:
+### OpenAI-compatible：Linux 或 macOS
+
+```sh
+export INTERVIEWCRAFT_LLM_PROVIDER=openai-compatible
+export INTERVIEWCRAFT_LLM_ENDPOINT=https://provider.example/v1
+export INTERVIEWCRAFT_LLM_MODEL=model-name
+export INTERVIEWCRAFT_LLM_API_KEY_ENV=INTERVIEWCRAFT_API_KEY
+export INTERVIEWCRAFT_API_KEY='<你的密钥>'
+
+interviewcraft doctor
+```
+
+Provider 地址必须使用 `http://` 或 `https://`，不得把用户名、密码、查询参数或片段写入 URL。例如下面的写法会被拒绝：
+
+```text
+https://user:password@provider.example/v1?api_key=secret
+```
+
+### 本地 Ollama
+
+先确保 Ollama 已运行并且目标模型已安装，再设置：
 
 ```powershell
 $env:INTERVIEWCRAFT_LLM_PROVIDER = "ollama"
 $env:INTERVIEWCRAFT_LLM_ENDPOINT = "http://127.0.0.1:11434"
-$env:INTERVIEWCRAFT_LLM_MODEL = "<installed-model>"
+$env:INTERVIEWCRAFT_LLM_MODEL = "<已安装模型名>"
+
 interviewcraft doctor
 ```
 
-| Variable | Purpose | Default |
+### 环境变量表
+
+| 环境变量 | 作用 | 默认值 |
 | --- | --- | --- |
-| `INTERVIEWCRAFT_DATA_DIR` | Local configuration and data directory | `~/.interviewcraft` |
-| `INTERVIEWCRAFT_LLM_PROVIDER` | `openai-compatible` or `ollama` | unset |
-| `INTERVIEWCRAFT_LLM_ENDPOINT` | Model service base URL | unset |
-| `INTERVIEWCRAFT_LLM_MODEL` | Model name | unset |
-| `INTERVIEWCRAFT_LLM_API_KEY_ENV` | Name of the environment variable containing the API key | `OPENAI_API_KEY` |
-| `RUNNER_MODE` | `disabled` or `docker` | `disabled` |
-| `AUDIO_PROVIDER` | Reserved audio provider selector | `browser` |
+| `INTERVIEWCRAFT_DATA_DIR` | 配置、SQLite、上传、导出和日志目录 | `~/.interviewcraft` |
+| `INTERVIEWCRAFT_LLM_PROVIDER` | `openai-compatible` 或 `ollama` | 未设置 |
+| `INTERVIEWCRAFT_LLM_ENDPOINT` | 模型服务基础 URL | 未设置 |
+| `INTERVIEWCRAFT_LLM_MODEL` | 模型名称 | 未设置 |
+| `INTERVIEWCRAFT_LLM_API_KEY_ENV` | 保存 API Key 的另一个环境变量名称 | `OPENAI_API_KEY` |
+| `RUNNER_MODE` | `disabled` 或 `docker` | `disabled` |
+| `AUDIO_PROVIDER` | MVP 保留的音频 Provider 选择器 | `browser` |
+| `COLUMNS` | 非交互/测试场景下覆盖终端列数 | 未设置时使用 120 |
+| `LINES` | 非交互/测试场景下覆盖终端行数 | 未设置时使用 36 |
 
-## Deployment tiers
+PowerShell 中通过 `$env:` 设置的变量只对当前进程及其子进程生效。生产部署时应使用操作系统服务管理器、容器编排环境或受控启动脚本注入变量，不要把密钥提交到仓库、写入 `config.json` 或放进命令行 URL。
 
-| Tier | Components | Data boundary | Code execution |
-| --- | --- | --- | --- |
-| Lite | Binary, embedded SQLite, one OpenAI-compatible Provider or Ollama | Training data stays in the local data directory; Provider receives only policy-selected context | Disabled by default |
-| Private Local | Lite plus a loopback Ollama endpoint | Training and model traffic stay on the machine | Disabled by default |
-| Full Practice | Lite or Private Local plus the InterviewCraft Docker Runner image | Same model boundary; submitted code enters a short-lived isolated container | Explicit `RUNNER_MODE=docker` |
+## 三种部署方式
 
-See [Deployment](docs/DEPLOYMENT.md) for platform setup, upgrades, backups, and tier changes. Full Practice does not change the Lite application dependencies: language runtimes live inside the optional Runner image.
+### 1. Lite：单机轻量部署
 
-## Export, migrate, and restore
+适合希望使用远程 OpenAI-compatible Provider，又不需要执行候选代码的用户。
 
-Create a migration package. Provider configuration and secrets are never included; Coach transcript text is excluded unless explicitly requested.
+组件：
+
+```text
+InterviewCraft 二进制
+├─ 内嵌 SQLite
+├─ 本地数据目录
+└─ 一个远程或本地模型 Provider
+```
+
+部署步骤：
+
+```powershell
+$env:RUNNER_MODE = "disabled"
+$env:INTERVIEWCRAFT_LLM_PROVIDER = "openai-compatible"
+$env:INTERVIEWCRAFT_LLM_ENDPOINT = "https://provider.example/v1"
+$env:INTERVIEWCRAFT_LLM_MODEL = "model-name"
+$env:INTERVIEWCRAFT_LLM_API_KEY_ENV = "INTERVIEWCRAFT_API_KEY"
+$env:INTERVIEWCRAFT_API_KEY = "<你的密钥>"
+
+interviewcraft init
+interviewcraft doctor
+interviewcraft run
+```
+
+此模式不需要 Docker、PostgreSQL、Redis、消息队列、对象存储或向量数据库。
+
+### 2. Private Local：本地私有模型部署
+
+适合希望训练数据和模型请求都留在本机的用户。
+
+组件：
+
+```text
+InterviewCraft 二进制 + 内嵌 SQLite + 本机 Ollama
+```
+
+建议只使用回环地址：
+
+```powershell
+$env:RUNNER_MODE = "disabled"
+$env:INTERVIEWCRAFT_LLM_PROVIDER = "ollama"
+$env:INTERVIEWCRAFT_LLM_ENDPOINT = "http://127.0.0.1:11434"
+$env:INTERVIEWCRAFT_LLM_MODEL = "<已安装模型名>"
+
+interviewcraft init
+interviewcraft doctor
+interviewcraft run --reduce-motion
+```
+
+只有在 Ollama 本身没有远程转发、遥测或外部调用的前提下，才能认为模型流量完全留在本机。InterviewCraft 不负责安装、启动或更新 Ollama。
+
+### 3. Full Practice：启用隔离代码执行
+
+适合需要 Python、JavaScript 和 Java 代码练习的用户。它是在 Lite 或 Private Local 之上增加可选 Docker Runner，不会改变主程序的 SQLite 架构。
+
+部署顺序：
+
+1. 安装并启动可信任的本地 Docker daemon；
+2. 从仓库根目录、仅以 `docker/runner` 为构建上下文构建镜像；
+3. 运行真实隔离攻击门；
+4. 隔离门全部通过后才设置 `RUNNER_MODE=docker`；
+5. 运行 `doctor` 验证镜像标签、默认用户和 daemon 状态。
+
+```powershell
+docker build -t interviewcraft-runner:local docker/runner
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-runner-isolation.ps1
+
+$env:RUNNER_MODE = "docker"
+interviewcraft doctor
+```
+
+若需要退回 Lite：
+
+```powershell
+$env:RUNNER_MODE = "disabled"
+interviewcraft doctor
+```
+
+已保存的代码证据仍保留在报告中，但不会再启动新的代码容器。
+
+## 命令行使用说明
+
+```text
+interviewcraft <command>
+```
+
+| 命令 | 作用 | 重要行为 |
+| --- | --- | --- |
+| `interviewcraft init` | 初始化配置、目录和 SQLite | 幂等；保留已有配置 |
+| `interviewcraft doctor` | 检查数据目录、SQLite、终端、Provider、可选 Runner | 阻塞错误返回 1；Runner disabled 只警告 |
+| `interviewcraft run` | 加载并渲染训练主页 | 当前渲染一次后退出 |
+| `interviewcraft export` | 导出迁移包或单份报告 | 默认不包含 Coach 原文，不覆盖已有文件 |
+| `interviewcraft import` | 导入完整迁移包 | 目标必须已初始化且没有训练数据 |
+
+查看帮助：
+
+```powershell
+interviewcraft --help
+interviewcraft run --help
+interviewcraft export --help
+interviewcraft import --help
+```
+
+### `run` 选项
+
+```text
+--theme auto|dark|light
+--ascii
+--reduce-motion
+--ansi-16
+--no-color
+```
+
+示例：
+
+```powershell
+interviewcraft run --theme dark --ansi-16
+interviewcraft run --ascii --reduce-motion --no-color
+```
+
+### `export` 选项
+
+```text
+--format package|json|markdown
+--output <新文件>
+--session <会话 ID>      # json/markdown 必需
+--include-coach          # 显式包含 Coach 原文
+```
+
+如果省略 `--output`：
+
+- `package` 默认写入数据目录的 `exports/interviewcraft-transfer.json`；
+- `json` 默认写入 `exports/report-<session-id>.json`；
+- `markdown` 默认写入 `exports/report-<session-id>.md`。
+
+导出不会覆盖已存在的同名文件。
+
+### `import` 选项
+
+```text
+--input <迁移包路径>
+```
+
+导入前会严格验证包版本、未知字段、ID、外键图和报告证据，整个写入在一个事务中完成；任一步失败都不会留下半导入状态。
+
+## 训练流程与键盘操作
+
+业务模型中的完整训练顺序为：
+
+```text
+简历输入
+  → 确认事实与目标岗位
+  → 生成/编辑/确认场景
+  → 文字面试
+  → 按需请求 Coach
+  → 可选代码练习
+  → 证据化报告
+  → 创建下一轮训练
+```
+
+交互设计遵循以下统一规则：
+
+- 全流程可使用键盘，不依赖鼠标；
+- `?` 打开当前屏幕快捷键帮助；
+- `Tab` 在可聚焦区域间移动；
+- `Esc` 关闭帮助或 overlay，并恢复进入前的焦点和草稿；
+- 面试主回答使用 `Ctrl+Enter` 提交，单独 `Enter` 只换行；
+- Coach 在窄屏中以全屏 overlay 打开，返回后保留主回答光标；
+- 代码工作台使用 `Ctrl+1/2/3` 切换 Python、JavaScript、Java；
+- 代码工作台使用 `Ctrl+S/F/Z/R/E/H` 完成保存、格式化、重置、运行、解释错误和返回面试。
+
+由于当前 `run` 尚未接入常驻事件循环，上述交互目前用于屏幕模型与自动化验收，不能全部从发布二进制入口到达。
+
+## 本地数据目录
+
+初始化后目录结构如下：
+
+```text
+~/.interviewcraft/
+├─ config.json             # 非敏感运行配置
+├─ interviewcraft.db       # SQLite 训练数据
+├─ uploads/                # 本地导入材料
+├─ exports/                # 默认导出位置
+└─ logs/                   # 本地日志目录
+```
+
+`config.json` 不保存 API Key 值。SQLite 中包含简历文本、画像、草稿、训练事件、Coach 事件、代码快照和报告，应按私密个人数据保护。
+
+如需切换目录，必须在 `init`、`doctor`、`run`、`export` 和 `import` 前使用一致的 `INTERVIEWCRAFT_DATA_DIR`。不要让两个正在写入的进程同时操作同一数据目录。
+
+## 导出迁移与恢复
+
+### 导出完整迁移包
 
 ```powershell
 interviewcraft export --format package --output .\interviewcraft-transfer.json
+```
+
+默认迁移包：
+
+- 包含画像、来源、场景、会话、主事件、草稿、代码证据和报告；
+- 不包含 Provider 配置或 API Key；
+- 不包含 Coach 回复原文，但保留安全的学习统计。
+
+只有明确需要时才包含 Coach 原文：
+
+```powershell
 interviewcraft export --format package --include-coach --output .\with-coach.json
 ```
 
-Export one completed report:
+### 导出单份报告
 
 ```powershell
-interviewcraft export --format markdown --session <session-id> --output .\report.md
-interviewcraft export --format json --session <session-id> --output .\report.json
+interviewcraft export --format markdown --session <会话 ID> --output .\report.md
+interviewcraft export --format json --session <会话 ID> --output .\report.json
 ```
 
-Restore only into an initialized instance with no training data:
+### 恢复到新实例
+
+目标实例必须已经 `init`，但不能包含任何训练数据：
 
 ```powershell
-$env:INTERVIEWCRAFT_DATA_DIR = "D:\InterviewCraft"
+$env:INTERVIEWCRAFT_DATA_DIR = "D:\InterviewCraftRestored"
 interviewcraft init
 interviewcraft import --input .\interviewcraft-transfer.json
 interviewcraft run
 ```
 
-Import strictly validates the package version, IDs, report evidence, and foreign-key graph before one atomic commit. Export never overwrites an existing file. For in-place upgrades, stop InterviewCraft, back up the complete data directory, install the new binary, and run `interviewcraft doctor`; embedded migrations apply automatically. Detailed recovery guidance is in [Deployment](docs/DEPLOYMENT.md#migration-backup-and-restore).
+导入不会覆盖目标实例已有的本地 Provider 配置。迁移后需要在新机器上重新注入 API Key 环境变量。
 
-## Optional Runner security
+## 启用 Docker Runner
 
-Enable Docker execution only after building the dedicated image and passing the isolation gate:
+### 构建镜像
+
+必须从仓库根目录运行，并将 `docker/runner` 作为唯一上下文：
 
 ```powershell
 docker build -t interviewcraft-runner:local docker/runner
-$env:RUNNER_MODE = "docker"
-interviewcraft doctor
+```
+
+不要改为以下命令：
+
+```text
+docker build -f docker/runner/Dockerfile .
+```
+
+后者会把整个仓库发送给 Docker builder，扩大简历、Git 历史或其他本地文件进入构建上下文的风险。
+
+如果需要代理，可通过脚本环境变量传入，不要在 Dockerfile 中持久化代理：
+
+```powershell
+$env:INTERVIEWCRAFT_RUNNER_BUILD_PROXY = "http://host.docker.internal:端口"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-runner-isolation.ps1
 ```
 
-Each run is network-disabled, non-root, capability-free, read-only, `no-new-privileges`, resource-limited, wall-clock-limited, and force-removed on every exit path. No host directory is mounted and no host environment is forwarded. Public output contains only public test names/statuses, hidden pass/fail counts, enumerated errors, duration, and peak memory. See [Security](docs/SECURITY.md) for the complete threat boundary and safe protocol.
+如果默认 Alpine CDN 不可用，可以配置经过确认的 HTTPS 镜像站：
 
-## Build and verify from source
+```powershell
+$env:INTERVIEWCRAFT_RUNNER_ALPINE_MIRROR = "https://<可信镜像站>/alpine"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-runner-isolation.ps1
+```
 
-Requirements:
+### 隔离策略
 
-- Go 1.26 or newer
-- PowerShell 7 in CI, or Windows PowerShell with `-ExecutionPolicy Bypass`
-- Docker only for Runner changes and the complete release gate
+每次代码执行使用全新容器，并强制：
 
-Lite checks without Docker:
+- `--network none`、`--ipc none`；
+- 只读根文件系统，不挂载宿主目录；
+- 用户 `65532:65532`，禁止 root；
+- `--cap-drop ALL`；
+- `no-new-privileges=true`；
+- CPU 0.50、内存/交换空间 256 MiB、PID 64；
+- `nproc`、`nofile=64:64` 和有界 noexec tmpfs；
+- 不转发宿主环境变量；
+- wall-clock 超时；
+- 成功、失败、超时、OOM、取消和协议错误后都强制删除容器与匿名卷。
+
+对外结果只能包含公开测试名称/状态、隐藏测试通过/失败数量、枚举错误、耗时和峰值内存。隐藏输入、预期结果、测试源码、原始 stderr、宿主/容器路径和密钥没有公开协议字段。
+
+完整安全边界见 [docs/SECURITY.md](docs/SECURITY.md)。
+
+## 升级与回滚
+
+### 原地升级
+
+1. 停止所有正在使用当前数据目录的 InterviewCraft 进程；
+2. 备份完整数据目录，而不只是 `interviewcraft.db`；
+3. 替换二进制文件；
+4. 保持 `INTERVIEWCRAFT_DATA_DIR` 不变；
+5. 运行 `interviewcraft doctor`，让内嵌迁移按顺序执行；
+6. 运行 `interviewcraft run` 并检查最近训练记录。
+
+不要手工修改 `_schema_migrations`，也不要手工执行项目迁移 SQL。
+
+### 回滚
+
+如果升级失败：
+
+1. 保留失败后的数据目录用于诊断；
+2. 停止所有写入进程；
+3. 恢复升级前的完整目录备份；
+4. 恢复旧版二进制；
+5. 重新运行 `doctor`。
+
+不要在 SQLite 正在写入时直接复制单个数据库文件作为一致性备份。跨机器迁移优先使用 `export --format package`。
+
+## 常见问题排查
+
+### `尚未初始化 Lite 配置`
+
+运行：
+
+```powershell
+interviewcraft init
+```
+
+并确认每次命令使用相同的 `INTERVIEWCRAFT_DATA_DIR`。
+
+### `doctor` 报终端尺寸不足
+
+将终端调整到至少 80×24。CI 或重定向输出场景可以显式设置：
+
+```powershell
+$env:COLUMNS = "120"
+$env:LINES = "36"
+interviewcraft doctor
+```
+
+### Provider 不可用
+
+依次检查：
+
+1. `INTERVIEWCRAFT_LLM_PROVIDER` 是否为 `openai-compatible` 或 `ollama`；
+2. endpoint 是否为可访问的 HTTP(S) 基础地址；
+3. endpoint 是否误带用户名、密码、查询参数或 `#fragment`；
+4. 模型名称是否真实存在；
+5. `INTERVIEWCRAFT_LLM_API_KEY_ENV` 指向的环境变量是否已设置；
+6. 本地 Ollama 是否正在监听配置的回环端口。
+
+### SQLite 或数据目录不可写
+
+确认运行用户对整个数据目录拥有创建、写入、重命名和删除文件的权限。不要把数据目录放在只读安装目录。Windows 上还应检查杀毒软件、受控文件夹访问和同步软件是否占用数据库。
+
+### Docker 不可用但只想使用文字训练
+
+保持：
+
+```powershell
+$env:RUNNER_MODE = "disabled"
+```
+
+Runner 警告不会阻塞 Lite。不要为消除警告而安装不需要的 Docker。
+
+### Runner 镜像不存在或不健康
+
+```powershell
+docker build -t interviewcraft-runner:local docker/runner
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-runner-isolation.ps1
+$env:RUNNER_MODE = "docker"
+interviewcraft doctor
+```
+
+不要删除安全参数来换取语言测试通过。
+
+### PowerShell 拒绝执行脚本
+
+使用一次性进程级绕过，而不是修改全局策略：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-release-quality.ps1 -SkipRunnerIsolation
 ```
 
-Complete release gate, including real Runner isolation attacks:
+## 从源码验证和发布
+
+### Docker-free Lite 门禁
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-release-quality.ps1 -SkipRunnerIsolation
+```
+
+它会检查：
+
+- `gofmt` 和 `git diff --check`；
+- 根模块与 Runner agent 模块的 `go mod verify`；
+- `go vet ./...`；
+- 根模块全量覆盖测试；
+- SQLite 迁移测试；
+- 嵌套 `docker/runner/agent` 测试；
+- 当前平台单二进制构建和 fresh-install smoke；
+- Windows、Linux、macOS × amd64、arm64 六目标交叉编译。
+
+### 完整发布门禁
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-release-quality.ps1
 ```
 
-The root `go test ./...` does not enter the nested `docker/runner/agent` module; the quality script tests it separately. See [Quality gates](docs/QUALITY_GATES.md) for the E2E and P-01–P-07 evidence matrix.
+完整门禁还会构建 Runner 镜像并执行 Python、JavaScript、Java 主流程，以及死循环、禁网、内存炸弹和进程炸弹隔离测试；最后要求专用集成容器残留为 0。
 
-## Contributing
+仓库根目录的 `go test ./...` 不会自动进入嵌套模块 `docker/runner/agent`，不能把根模块单独通过当作完整发布通过。
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing contracts, migrations, AI policies, or Runner isolation. Security issues should follow the private reporting guidance in [SECURITY.md](docs/SECURITY.md#reporting-a-vulnerability).
+详细证据矩阵见 [docs/QUALITY_GATES.md](docs/QUALITY_GATES.md)。发布归档配置见 [.goreleaser.yaml](.goreleaser.yaml)，CI 配置见 [.github/workflows/](.github/workflows/)。
 
-Product scope is defined in the [MVP PRD](docs/InterviewCraft_Agent_PRD_MVP_v2.1_TUI.md), the terminal contract in [DESIGN.md](docs/DESIGN.md), and ordered acceptance work in [TODO.md](TODO.md).
+## 安全与隐私边界
 
-## MVP non-goals
+- 简历和训练数据默认保存在本机 SQLite；
+- 使用远程模型时，经过角色策略选择的上下文会发送给该 Provider；
+- 使用本地 Ollama 时，是否完全离线还取决于 Ollama 自身配置；
+- API Key 值不写入配置、界面、报告或迁移包；
+- Interviewer 看不到 Coach 回复正文；
+- Coach 看不到未提交回答、未运行代码草稿或之前的 Coach 正文；
+- Evaluator 不允许无证据的人格、录用或能力断言；
+- Docker daemon 属于可信基础设施，Runner 不是面向不可信多租户的云沙箱；
+- 本地数据库目前不提供应用层静态加密，需要时应使用操作系统磁盘或目录加密。
 
-- No real-interview covert assistance, stealth mode, screen evasion, or automatic answering.
-- No video, face, emotion, personality, hiring, or employment-decision scoring.
-- No required vector database, queue, microservices, complex permissions, or cloud observability stack.
-- No multi-user collaboration, mentor review, billing, automated applications, or ATS integration.
-- Voice ASR/TTS is not an MVP release blocker; the complete text path is the baseline.
+不要在公开 Issue 中提交真实简历、API Key、隐藏测试或容器逃逸细节。安全问题请使用 GitHub 仓库的私密 Security Advisory 渠道。
+
+## 相关文档
+
+- [产品需求文档](docs/InterviewCraft_Agent_PRD_MVP_v2.1_TUI.md)
+- [终端设计系统](docs/DESIGN.md)
+- [Lite Runtime ADR](docs/ADR-0001-lite-runtime.md)
+- [部署与运维](docs/DEPLOYMENT.md)
+- [安全模型](docs/SECURITY.md)
+- [质量门与验收矩阵](docs/QUALITY_GATES.md)
+- [贡献指南](CONTRIBUTING.md)
+- [有序任务与验收记录](TODO.md)
+
+## 贡献与许可证
+
+贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，尤其是领域契约、迁移、Agent 上下文隔离和 Runner 安全规则。普通功能必须在 `RUNNER_MODE=disabled`、没有 Docker 的环境中通过测试。
+
+当前仓库尚未包含 `LICENSE` 文件。代码虽然公开可见，但在选择并加入 MIT、Apache-2.0 等许可证之前，严格意义上尚未授予他人复制、修改和分发代码的开源许可。
+
+## MVP 明确不做
+
+- 不提供真实面试中的隐蔽辅助、屏幕规避或自动代答；
+- 不做视频、人脸、情绪、人格、录用或招聘决策评分；
+- 不强制引入向量数据库、消息队列、微服务或云端观测平台；
+- 不在 MVP 中提供多人协作、导师批注、付费、自动投递或 ATS 集成；
+- 语音 ASR/TTS 不是 MVP 发布阻塞条件，完整文字训练路径优先。
