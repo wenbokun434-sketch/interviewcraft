@@ -1,11 +1,11 @@
-# InterviewCraft MVP 开发清单
+# InterviewCraft MVP 与一键部署开发清单
 
 > 规范基线：`docs/InterviewCraft_Agent_PRD_MVP_v2.1_TUI.md`（v2.1）与 `docs/DESIGN.md`（v1.0）
-> 实施策略：Go 单二进制 + TUI + SQLite；Lite 模式默认不依赖 Docker、Node.js、外部数据库、队列或常驻服务。
+> 实施策略：Go 单二进制 + TUI + SQLite；Lite 模式默认不依赖 Docker、Node.js、外部数据库、队列或常驻服务；T-023～T-029 在此基础上完成可信的一键安装、配置、运行、升级与回滚。
 
 ## 0. 强制执行协议
 
-1. 必须严格按 T-001 → T-022 的顺序开发；前一项未通过，不得开始后一项。
+1. 必须严格按 T-001 → T-029 的顺序开发；前一项未通过，不得开始后一项。
 2. 每轮只能有一个任务从 `[ ]` 变为 `[x]`；不得预先勾选、批量勾选或跳项。
 3. 开始每轮前，必须在回复和本文件“执行记录”中明确：
    - 修改目标
@@ -19,10 +19,12 @@
    - 空数据
    - 接口/依赖报错
 6. 对纯基础设施任务，若某类 UI 状态不适用，也必须在测试记录中明确写出 `N/A` 及原因，不得直接省略。
-7. 每项任务必须依次完成：实现 → 格式化/静态检查 → 单元测试 → 模块测试 → 主链路回归 → 更新本文件（只勾当前项并写测试记录）→ 立即 Git 提交。
+7. 每项任务必须依次完成：实现 → 格式化/静态检查 → 单元测试 → 模块测试 → 主链路回归 → 更新本文件（只勾当前项并写测试记录）→ 立即 Git 提交；测试已经跑通时不得继续夹带下一模块修改。
 8. 测试未通过时不得勾选、不得提交“完成”提交；修复必须留在当前任务范围内。
 9. 每项任务使用独立提交，提交信息格式：`type(scope): T-xxx concise summary`。
-10. `docs/` 是需求基线。除非用户明确要求修订规范，否则开发任务不得修改其中内容。
+10. 提交前必须依次运行 `git status --short`、仅显式暂存当前任务允许范围内的文件、`git diff --cached --check`、`git diff --cached --name-only`；确认暂存区不含其他任务、用户已有修改、本地数据、密钥、数据库、日志或构建产物后，立即执行当前任务规定的 `git commit`，提交完成后再次检查 `git status --short`。
+11. 禁止使用 `git add -A`、`git add .` 或其他会无差别暂存工作区内容的命令；禁止为了得到干净状态而删除、覆盖或重置用户已有文件。默认只要求本地提交，不自动推送远端。
+12. `docs/` 是需求基线。除非用户明确要求修订规范，否则开发任务不得修改其中内容。
 
 ## 1. 全局不可破坏约束
 
@@ -308,6 +310,97 @@
   - `go test ./...`、静态检查、构建、迁移、新安装烟测和 README 命令全部通过。
   - README 覆盖二进制安装、`init/run/doctor`、部署档位、环境变量、迁移、Runner 安全和贡献指南。
 - 完成后提交：`chore(release): T-022 complete MVP quality gates`
+
+### [ ] T-023 常驻 TUI 事件循环与完整发布入口
+
+- 修改目标：将现有 P-01～P-07 屏幕模型接入一个常驻、可恢复终端状态的应用事件循环，使发布二进制执行 `interviewcraft run` 后能够完成整场训练，而不是只渲染一次主页后退出。
+- 允许修改的范围：新增 `internal/tui/app/` 与必要的终端输入适配层、`internal/cli/` 中 `run` 的启动接线、各屏幕为统一导航协议所必需的最小接口、`cmd/interviewcraft/`、确有必要的纯 Go 终端依赖及 `go.mod/go.sum`、对应测试、`scripts/` 中与发布入口烟测直接相关的脚本、`README.md` 当前实现状态、`TODO.md` 当前任务状态与记录。
+- 不允许破坏的逻辑：不得改写既有领域服务、SQLite 事件顺序、证据链、Coach/Interviewer 上下文隔离或 Runner 安全边界；不得改变现有快捷键、响应式断点和主题语义；异常、取消和 `Ctrl+C` 必须恢复终端，不能丢草稿或留下数据库写事务；继续保持 CGO-free、单二进制和 Lite 无 Docker 可用；不得提前实现安装、更新或镜像分发。
+- 验收的标准：
+  - 主流程：从真实 `interviewcraft run` 进入训练主页，完成 `画像 → 场景 → 文字面试 → Coach → 可选代码 → 报告 → 下一轮`，退出并重启后可恢复最近持久化状态。
+  - 加载中：Provider、Coach、评估和 Runner 异步操作均在事件循环中持续刷新，允许既定取消/返回操作，不冻结键盘、resize 或无关编辑区，也不重复提交事件。
+  - 空数据：全新 SQLite 打开训练主页时只提供明确的首要动作，空列表、无 Provider、无题目和无报告均可导航且不会 panic 或自动制造业务数据。
+  - 接口/依赖报错：Provider、SQLite、终端输入和 Runner 故障均显示类型化恢复动作；取消或报错后草稿与已提交证据保留，终端模式和光标状态恢复。
+  - 160×48、120×36、80×24、72×22 阻塞、ASCII、no-color、reduce-motion、CJK、长错误和全键盘 E2E 通过；原 P-01～P-07 快照、领域测试、`test-fresh-install.ps1`、静态检查、两模块测试及单二进制构建全部通过。
+- 完成后提交：`feat(tui-app): T-023 run the complete interactive journey`
+
+### [ ] T-024 幂等 `setup` 向导、部署档位与凭据安全
+
+- 修改目标：新增交互式和非交互式 `interviewcraft setup`，用一个可恢复的编排入口完成 Lite、Private Local 和 Full Practice 的配置选择、数据初始化、凭据注入、健康检查与启动准备。
+- 允许修改的范围：新增 `internal/setup/`、新增凭据存储抽象及 Windows/macOS/Linux 平台适配文件、`internal/cli/`、`internal/config/`、`internal/doctor/`、设置页与 setup 共用表单所必需的最小接口、对应测试和测试替身、`README.md` 的 setup 用法、`TODO.md` 当前任务状态与记录。
+- 不允许破坏的逻辑：`init`、`doctor` 和已有环境变量配置必须继续兼容；不得把 API Key 写入 `config.json`、命令行参数、日志、错误、导出包或测试快照；凭据库不可用时只能明确退回环境变量引用，不能静默明文落盘；重复 setup 不得覆盖用户数据或未授权更改 Provider；Runner 必须默认 disabled，不能静默安装 Docker、请求管理员权限或启用代码执行；不得提前实现发布下载、自动更新或远端镜像拉取。
+- 验收的标准：
+  - 主流程：全新目录分别完成 Lite/OpenAI-compatible、Private Local/Ollama 配置；Full Practice 通过可注入 Runner provisioner 完成编排；`setup → init → doctor → run` 可重复执行且配置与数据保持一致。
+  - 加载中：setup 按 `preflight → profile → provider → credential → initialize → diagnose → complete` 发出确定性进度；取消后保留已确认输入和安全检查点，重试从最近安全步骤继续。
+  - 空数据：没有配置、没有 Provider、凭据库为空或数据目录尚不存在时进入明确向导，不创建半配置、空密钥或不可用 Runner 状态；非交互模式缺必填项时返回 usage 错误和字段列表。
+  - 接口/依赖报错：凭据库、Provider、Ollama、目录权限、SQLite 和诊断失败分别给出脱敏恢复动作；失败不覆盖旧配置、不删除旧凭据、不留下半迁移数据库。
+  - setup 状态机、平台凭据契约、密钥泄漏扫描、配置幂等、取消恢复、原 `init/doctor/settings/export/import` 回归、静态检查、测试和单二进制构建全部通过。
+- 完成后提交：`feat(setup): T-024 add idempotent secure setup`
+
+### [ ] T-025 可验证发布清单、版本元数据与供应链门禁
+
+- 修改目标：让每个正式版本同时产出机器可读发布清单、版本信息、跨平台归档、校验和、签名、SBOM 和可验证构建来源，为安装器与更新器提供唯一可信输入。
+- 允许修改的范围：新增 `internal/version/`、CLI 的 `version` 命令、`.goreleaser.yaml`、`.github/workflows/release.yml` 及必要的发布工作流、`scripts/` 下发布清单生成/校验脚本、发布相关测试和 fixture、`README.md` 的版本校验说明、`TODO.md` 当前任务状态与记录。
+- 不允许破坏的逻辑：不得跳过或弱化现有完整发布门禁；不得在质量门未通过时发布资产；不得把长期签名私钥提交仓库；不得允许 manifest、checksum、签名和实际归档版本不一致；不得改变 Lite/Runner 的运行时安全边界或把 Docker 加入普通构建依赖；不得提前实现本机安装和升级写操作。
+- 验收的标准：
+  - 主流程：`v*` 标签通过完整质量门后生成 Windows/Linux/macOS × amd64/arm64 归档、`checksums.txt`、签名、SBOM、来源证明和含版本/平台/URL/hash/size 的严格发布清单；`interviewcraft version` 与产物元数据一致。
+  - 加载中：发布流水线按质量门、构建、清单、签名、验证、发布分阶段输出；发布前验证阶段能读取全部资产并显示确定性进度，未完成时不把 Release 标为可用。
+  - 空数据：无发布标签、空 manifest、缺少当前平台资产或零字节资产均被显式拒绝，不生成“成功”发布或选择其他平台兜底。
+  - 接口/依赖报错：构建、GitHub Release、签名、上传、下载回读、checksum 或 schema 校验任一失败都返回非零并阻止完成发布；日志不得包含令牌或凭据。
+  - 本地 fixture 校验、篡改归档/清单/签名拒绝测试、YAML 语法、GoReleaser dry-run、现有发布质量门和六目标交叉编译全部通过。
+- 完成后提交：`chore(distribution): T-025 publish verifiable release metadata`
+
+### [ ] T-026 Windows、Linux 与 macOS 一键安装/卸载
+
+- 修改目标：提供不依赖 Go 的 `install.ps1`、`install.sh` 及对应卸载入口，自动识别平台、下载并验证发布产物、安装到当前用户目录、配置 PATH，并调用 `interviewcraft setup` 完成首次部署。
+- 允许修改的范围：新增 `scripts/install.ps1`、`scripts/install.sh`、`scripts/uninstall.ps1`、`scripts/uninstall.sh` 及共用 fixture/测试、`.goreleaser.yaml` 的安装脚本归档、安装器所需的最小发布工作流调整、`.gitignore`、`README.md` 安装/卸载说明、`docs/DEPLOYMENT.md`、`TODO.md` 当前任务状态与记录。
+- 不允许破坏的逻辑：默认只能安装到当前用户可写目录，不得静默请求管理员/root 权限、执行未验证内容或修改系统范围配置；不得使用未签名/校验失败资产；重复安装同版本必须幂等，升级旧版本必须留给 T-028；卸载默认保留 `~/.interviewcraft`，不得删除用户数据、密钥或其他程序 PATH；不得把本地数据、安装缓存或密钥提交仓库。
+- 验收的标准：
+  - 主流程：Windows PowerShell 与 Linux/macOS shell 在无 Go 的干净环境中一条命令完成平台识别、下载、签名/checksum 验证、用户级安装、PATH 配置、`setup → doctor`，新终端可直接运行 `interviewcraft version` 和 `run`。
+  - 加载中：下载、验证、解压、安装、PATH、setup 和 doctor 均显示明确阶段及可取消行为；取消后旧版本和 PATH 保持可用，临时文件可安全清理。
+  - 空数据：首次安装、PATH 中不存在旧版本、没有配置/数据目录时完成新装；Release 无当前平台资产时给出支持矩阵，不创建空二进制或残缺安装目录。
+  - 接口/依赖报错：网络/代理、Release API、签名、checksum、权限、磁盘空间、解压、PATH 和 setup 失败均非零退出并给恢复动作；失败不得覆盖可用旧二进制或删除用户数据。
+  - 安装两次幂等、卸载后 PATH 无残留且数据保留、恶意 manifest/路径穿越/截断下载被拒绝；PowerShell AST、ShellCheck、干净 VM/容器 smoke、发布归档 fresh-install 和原质量门全部通过。
+- 完成后提交：`feat(installer): T-026 add verified one-command installation`
+
+### [ ] T-027 预构建 Runner 镜像、完整诊断与 Full Practice 部署
+
+- 修改目标：在发布流水线构建并发布与应用版本匹配的 amd64/arm64 Runner 镜像，使用不可变 digest 完成拉取、验证和启用，使 Full Practice 不再要求用户从源码构建镜像。
+- 允许修改的范围：`docker/runner/`、`internal/adapters/runner/`、`internal/config/`、`internal/doctor/`、`internal/setup/` 的 Runner provisioner、`scripts/test-runner-isolation.ps1` 及新增镜像发布/验证脚本、`.github/workflows/`、`.goreleaser.yaml` 或发布清单中的 Runner 元数据、相关测试、`README.md`、`docs/DEPLOYMENT.md`、`docs/SECURITY.md`、`TODO.md` 当前任务状态与记录。
+- 不允许破坏的逻辑：Runner 仍默认 disabled；不得自动安装/启动 Docker 或请求特权；容器必须继续禁网、非 root、只读根、无宿主挂载、drop all capabilities、no-new-privileges、限 CPU/内存/PID/ulimit、每次强制清理且不泄露隐藏测试；只接受签名有效、版本兼容、标签/用户正确并固定 digest 的镜像；Runner/Registry 失败不得阻塞 Lite 文字主链路。
+- 验收的标准：
+  - 主流程：发布流水线产出 amd64/arm64 签名镜像和 digest，`setup --profile full` 在已有 Docker 环境中拉取并验证镜像，`doctor` 同时验证 daemon、镜像签名/标签/默认用户/协议版本，三语言练习通过。
+  - 加载中：镜像解析、拉取、签名验证、inspect、隔离 smoke 和启用按阶段报告；拉取期间可取消，未全部通过前 `RUNNER_MODE` 保持 disabled。
+  - 空数据：无 Docker、无本地镜像、manifest 无 Runner digest 或用户选择 Lite 时不创建容器、不改变模式，并提供明确安装/稍后启用路径。
+  - 接口/依赖报错：Registry、签名、digest、架构、标签、用户、协议、Docker daemon 和隔离 smoke 任一失败都拒绝启用 Runner，清理临时镜像/容器并保持 Lite 可用。
+  - 原 Runner 单元/集成/攻击测试全部通过；签名篡改、错误 digest、错误架构、无效标签和中断拉取测试通过；最终残留容器为 0，普通 Lite 质量门仍不依赖 Docker。
+- 完成后提交：`feat(runner-deploy): T-027 publish and provision signed runner images`
+
+### [ ] T-028 自动更新、完整备份、失败回滚与安全卸载
+
+- 修改目标：新增 `update --check`、`update`、`rollback` 和安全卸载能力，在保持用户数据和可用旧版本的前提下完成可信升级、SQLite 迁移验证以及失败后的二进制与数据整体恢复。
+- 允许修改的范围：新增 `internal/update/`、CLI 的 update/rollback/uninstall 接线、`internal/db/` 中备份/独占锁所需的最小接口、`internal/config/` 中安装状态元数据、Windows 自替换 helper、`scripts/install*`/`uninstall*` 的升级接线、发布清单客户端、对应测试和 fixture、`README.md`、`docs/DEPLOYMENT.md`、`TODO.md` 当前任务状态与记录。
+- 不允许破坏的逻辑：不得在写进程活动时直接复制数据库；不得覆盖唯一可用二进制或原地修改备份；不得在缺少有效签名/checksum、备份或磁盘空间时升级；数据库降级必须同时恢复升级前完整数据目录，不能只替换二进制；回滚/卸载默认不得删除用户数据和凭据；`--purge-data` 必须使用精确目标、显式二次确认且不能作用于宽泛目录。
+- 验收的标准：
+  - 主流程：检查新版本、下载验证、获取独占锁、创建可验证备份、原子切换二进制、运行迁移和 doctor、提交升级；随后可回滚到前一版本并恢复对应数据，最近会话和报告一致。
+  - 加载中：check/download/verify/backup/switch/migrate/doctor/commit 各阶段可观测；安全阶段前可取消且不改现状，切换后取消或失败自动进入回滚，不能同时启动第二个更新。
+  - 空数据：无更新、首次无备份、全新空数据库和无 Runner 环境均返回明确结果；无更新不是错误，不生成空备份或伪造可回滚版本。
+  - 接口/依赖报错：Release API、网络、签名、checksum、锁、磁盘、备份、替换、迁移、doctor、Runner 更新任一失败都恢复旧二进制和匹配数据；错误脱敏且保留诊断材料路径。
+  - Windows 正在使用二进制替换、Linux/macOS 原子 rename、迁移失败、断电点故障注入、并发更新、备份损坏、回滚与卸载保留数据测试通过；现有迁移、transfer、fresh-install 和完整质量门回归通过。
+- 完成后提交：`feat(update): T-028 add verified upgrade and rollback`
+
+### [ ] T-029 一键完整部署 E2E、故障矩阵与交付文档
+
+- 修改目标：建立干净环境的一键完整部署验收矩阵，统一 Lite、Private Local、Full Practice 的安装、setup、运行、更新、回滚和卸载证据，并把最终用户路径固化到 CI 和交付文档。
+- 允许修改的范围：全仓仅为修复部署验收缺陷所必需的代码、`internal/e2e/`、`scripts/` 下部署测试与 fixture、`.github/workflows/` 部署矩阵、`.goreleaser.yaml`、`README.md`、`docs/DEPLOYMENT.md`、`docs/SECURITY.md`、`docs/QUALITY_GATES.md`、`CONTRIBUTING.md`、`TODO.md` 当前任务状态与记录。
+- 不允许破坏的逻辑：不得降低 T-001～T-028 的测试、隐私、证据、隔离、签名或回滚门禁来换取绿灯；不得把 Docker、Go、Node.js、Python、Java、外部数据库或管理员权限变成 Lite 前置；不得在文档中宣称未自动化验证的平台/模式已经通过；不得提交安装缓存、Release 凭据、本地数据、数据库、日志或构建产物。
+- 验收的标准：
+  - 主流程：Windows、Linux、macOS 干净环境完成“一条安装命令 → setup → doctor → 完整训练 → 重启恢复 → update → rollback → uninstall”；Full Practice 另在受支持 Docker runner 上完成签名镜像拉取与三语言练习。
+  - 加载中：安装、setup、Provider、训练、Runner、更新和回滚的全部异步阶段有自动化断言，键盘/取消/重试可用，不出现冻结、重复事件、半配置或半升级。
+  - 空数据：全新用户、无 Provider、无历史、无 Runner、无更新、无备份分别显示唯一明确下一步；Lite 在无 Docker/无外部数据库环境完整可用。
+  - 接口/依赖报错：覆盖网络/Release API、签名/checksum、Provider、凭据库、目录/SQLite、终端、Docker/Registry/Runner、迁移和回滚失败；每项均验证脱敏提示、恢复动作、数据保留和再次执行成功。
+  - 干净环境矩阵、四态故障矩阵、安装幂等、完整训练、升级回滚、卸载保留数据、Runner 零残留、供应链篡改拒绝、六目标构建、全部单元/模块/E2E/安全门禁通过；README 的复制粘贴命令由 CI 实际执行，执行记录写入平台、版本、耗时和提交 SHA。
+- 完成后提交：`chore(deployment): T-029 certify one-click full deployment`
 
 ## 3. 执行记录
 
