@@ -7,6 +7,7 @@ coverage.out
 
 # Local runtime data
 /data/
+/.interviewcraft/
 *.db
 *.db-shm
 *.db-wal

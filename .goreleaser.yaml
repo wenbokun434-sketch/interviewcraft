@@ -43,6 +43,11 @@ archives:
       - README.md
       - docs/DEPLOYMENT.md
       - docs/SECURITY.md
+      - scripts/install.ps1
+      - scripts/install.sh
+      - scripts/uninstall.ps1
+      - scripts/uninstall.sh
+      - scripts/cosign-v3.1.3-sha256.txt
 
 checksum:
   name_template: checksums.txt

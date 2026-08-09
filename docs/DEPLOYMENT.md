@@ -16,7 +16,11 @@ Start from either Lite tier, build `interviewcraft-runner:local` from the narrow
 
 ## Platform installation
 
-Release artifacts cover Windows, Linux, and macOS on amd64 and arm64. Verify the archive against `checksums.txt`, extract it into a user-controlled executable directory, and ensure that directory is on `PATH`. The binary does not require a companion service or installer.
+Release artifacts cover Windows, Linux, and macOS on amd64 and arm64. The supported one-command installers are `scripts/install.ps1` for Windows PowerShell 5.1/7 and `scripts/install.sh` for POSIX shells. They install only into user-writable locations, manage marked user PATH entries, run `setup` and `doctor` by default, and never request elevation.
+
+The installer trust sequence is fixed: verify the downloaded Cosign v3.1.3 executable against `scripts/cosign-v3.1.3-sha256.txt`; verify the manifest bundle against the exact tagged release workflow identity and GitHub Actions OIDC issuer; strictly parse the manifest; verify archive SHA-256 and size; reject traversal, links, and unexpected executables; execute the staged binary's `version --json`; then atomically place it. A secret-free receipt at `~/.interviewcraft/install-receipt.txt` records the exact binary and PATH files for uninstall.
+
+Reinstalling the same version is idempotent. A different installed version is not overwritten because verified upgrades and rollback belong to T-028. `scripts/uninstall.ps1` and `scripts/uninstall.sh` remove only receipt-owned binary/PATH entries and preserve configuration, credentials, SQLite data, and the rest of `~/.interviewcraft`.
 
 The supported terminal minimum is 80×24. Use `--ascii`, `--no-color`, or `--reduce-motion` for limited terminal capabilities. At smaller dimensions the application deliberately renders an actionable blocked state instead of a clipped workspace.
 

@@ -68,7 +68,43 @@ MVP 的领域服务、SQLite 持久化、P-01～P-07 屏幕模型、三语言 Ru
 
 ## 安装
 
-### 方式一：下载发行包
+### 方式一：一键验证安装（推荐）
+
+Windows PowerShell 5.1 或 PowerShell 7：
+
+```powershell
+$installer = Join-Path $env:TEMP "interviewcraft-install.ps1"; Invoke-WebRequest "https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/main/scripts/install.ps1" -OutFile $installer; & $installer; Remove-Item $installer
+```
+
+Linux 或 macOS：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/main/scripts/install.sh -o /tmp/interviewcraft-install.sh && sh /tmp/interviewcraft-install.sh && rm -f /tmp/interviewcraft-install.sh
+```
+
+安装器默认安装最新 Lite 版本，写入当前用户的 PATH，并执行 `setup → doctor`；不请求管理员或 root 权限。Windows 默认目录为 `%LOCALAPPDATA%\Programs\InterviewCraft\bin`，Linux/macOS 默认为 `$HOME/.local/bin`。可传入固定版本、档位和非敏感 Provider 参数，例如：
+
+```powershell
+$installer = Join-Path $env:TEMP "interviewcraft-install.ps1"; Invoke-WebRequest "https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/main/scripts/install.ps1" -OutFile $installer; & $installer -Version 1.2.3 -Profile private-local -Provider ollama -Endpoint http://127.0.0.1:11434 -Model llama3.2 -NonInteractive; Remove-Item $installer
+```
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/main/scripts/install.sh -o /tmp/interviewcraft-install.sh && sh /tmp/interviewcraft-install.sh --version 1.2.3 --profile private-local --provider ollama --endpoint http://127.0.0.1:11434 --model llama3.2 --non-interactive && rm -f /tmp/interviewcraft-install.sh
+```
+
+API Key 只可通过 `-ApiKeyStdin`/`--api-key-stdin` 传入。安装器先用仓库固定 SHA-256 验证 Cosign v3.1.3，再验证发布清单的 Sigstore bundle、精确 GitHub Actions 发布者身份和 OIDC issuer，随后验证归档 hash/size、路径和内嵌版本，最后原子安装。同版本重复执行是幂等的；检测到其他版本会拒绝覆盖，升级留给 T-028。
+
+卸载只依据无密钥安装收据删除自身二进制和 PATH 条目，默认保留配置、系统凭据和 `~/.interviewcraft`：
+
+```powershell
+$uninstaller = Join-Path $env:TEMP "interviewcraft-uninstall.ps1"; Invoke-WebRequest "https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/main/scripts/uninstall.ps1" -OutFile $uninstaller; & $uninstaller; Remove-Item $uninstaller
+```
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/main/scripts/uninstall.sh -o /tmp/interviewcraft-uninstall.sh && sh /tmp/interviewcraft-uninstall.sh
+```
+
+### 方式二：手动下载发行包
 
 如果 [Releases 页面](https://github.com/wenbokun434-sketch/interviewcraft/releases)已有构建产物，请同时下载平台压缩包、`release-manifest.txt` 和 `release-manifest.sigstore.json`。发行包命名格式为：
 
@@ -112,7 +148,7 @@ cosign verify-blob \
 
 再按清单校验归档 hash 与 size，并在解压后运行 `interviewcraft version --json` 核对版本、commit、构建时间和平台。Release 工作流会先创建 Draft，重新下载所有资产完成同样验证后才公开；`release-provenance.sigstore.json` 保存 GitHub 构建来源证明。若 Releases 暂无附件，请使用源码构建。
 
-### 方式二：从源码构建
+### 方式三：从源码构建
 
 Windows PowerShell：
 

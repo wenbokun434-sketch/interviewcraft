@@ -72,6 +72,24 @@ try {
     Invoke-Native -FilePath $GoBinary -Arguments @("build", "-trimpath", "-o", $binary, "./cmd/interviewcraft")
     & (Join-Path $PSScriptRoot "test-fresh-install.ps1") -GoBinary $GoBinary -BinaryPath $binary
     & (Join-Path $PSScriptRoot "test-release-metadata.ps1") -GoBinary $GoBinary
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        if ($SkipRunnerIsolation) {
+            & (Join-Path $PSScriptRoot "test-installers.ps1") -GoBinary $GoBinary -SkipLinuxContainer
+        }
+        else {
+            & (Join-Path $PSScriptRoot "test-installers.ps1") -GoBinary $GoBinary
+        }
+    }
+    else {
+        $savedGoBinary = $env:GO_BINARY
+        try {
+            $env:GO_BINARY = $GoBinary
+            Invoke-Native -FilePath "sh" -Arguments @((Join-Path $PSScriptRoot "test-installers-posix.sh"))
+        }
+        finally {
+            [Environment]::SetEnvironmentVariable("GO_BINARY", $savedGoBinary, "Process")
+        }
+    }
 
     $savedGOOS = [Environment]::GetEnvironmentVariable("GOOS", "Process")
     $savedGOARCH = [Environment]::GetEnvironmentVariable("GOARCH", "Process")

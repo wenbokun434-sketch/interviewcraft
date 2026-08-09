@@ -108,7 +108,12 @@ jobs:
             dist/*.spdx.json \
             dist/release-manifest.txt \
             dist/release-manifest.sigstore.json \
-            dist/release-provenance.sigstore.json
+            dist/release-provenance.sigstore.json \
+            scripts/install.ps1 \
+            scripts/install.sh \
+            scripts/uninstall.ps1 \
+            scripts/uninstall.sh \
+            scripts/cosign-v3.1.3-sha256.txt
 
       - name: Download draft assets and verify before publication
         shell: bash
