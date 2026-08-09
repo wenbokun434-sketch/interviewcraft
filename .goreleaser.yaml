@@ -1,6 +1,7 @@
 version: 2
 
 project_name: interviewcraft
+report_sizes: true
 
 before:
   hooks:
@@ -16,6 +17,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+      - -X github.com/interviewcraft/interviewcraft/internal/version.ApplicationVersion={{ .Version }}
+      - -X github.com/interviewcraft/interviewcraft/internal/version.GitCommit={{ .Commit }}
+      - -X github.com/interviewcraft/interviewcraft/internal/version.BuildTime={{ .Date }}
     goos:
       - linux
       - windows
@@ -42,6 +46,12 @@ archives:
 
 checksum:
   name_template: checksums.txt
+
+sboms:
+  - id: archive
+    artifacts: archive
+    documents:
+      - "${artifact}.spdx.json"
 
 changelog:
   sort: asc

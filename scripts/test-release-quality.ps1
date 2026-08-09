@@ -71,6 +71,7 @@ try {
     $binary = Join-Path $buildRoot ("interviewcraft" + $extension)
     Invoke-Native -FilePath $GoBinary -Arguments @("build", "-trimpath", "-o", $binary, "./cmd/interviewcraft")
     & (Join-Path $PSScriptRoot "test-fresh-install.ps1") -GoBinary $GoBinary -BinaryPath $binary
+    & (Join-Path $PSScriptRoot "test-release-metadata.ps1") -GoBinary $GoBinary
 
     $savedGOOS = [Environment]::GetEnvironmentVariable("GOOS", "Process")
     $savedGOARCH = [Environment]::GetEnvironmentVariable("GOARCH", "Process")

@@ -70,7 +70,7 @@ MVP 的领域服务、SQLite 持久化、P-01～P-07 屏幕模型、三语言 Ru
 
 ### 方式一：下载发行包
 
-如果 [Releases 页面](https://github.com/wenbokun434-sketch/interviewcraft/releases)已有构建产物，请同时下载平台压缩包和 `checksums.txt`。发行包命名格式为：
+如果 [Releases 页面](https://github.com/wenbokun434-sketch/interviewcraft/releases)已有构建产物，请同时下载平台压缩包、`release-manifest.txt` 和 `release-manifest.sigstore.json`。发行包命名格式为：
 
 ```text
 interviewcraft_<版本>_<操作系统>_<架构>
@@ -100,7 +100,17 @@ tar -xzf interviewcraft_<版本>_darwin_arm64.tar.gz
 ./interviewcraft --help
 ```
 
-运行前应将计算出的 SHA-256 与 `checksums.txt` 对照。若 Releases 暂无附件，请使用源码构建。
+正式发布清单使用 Tab 分隔，固定记录版本、Git commit、创建时间，以及六个平台归档、`checksums.txt` 和 SPDX SBOM 的 SHA-256/字节数。先使用 Cosign v3.1.3 验证发布者身份：
+
+```sh
+cosign verify-blob \
+  --bundle release-manifest.sigstore.json \
+  --certificate-identity "https://github.com/wenbokun434-sketch/interviewcraft/.github/workflows/release.yml@refs/tags/v<版本>" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  release-manifest.txt
+```
+
+再按清单校验归档 hash 与 size，并在解压后运行 `interviewcraft version --json` 核对版本、commit、构建时间和平台。Release 工作流会先创建 Draft，重新下载所有资产完成同样验证后才公开；`release-provenance.sigstore.json` 保存 GitHub 构建来源证明。若 Releases 暂无附件，请使用源码构建。
 
 ### 方式二：从源码构建
 
@@ -358,6 +368,7 @@ interviewcraft <command>
 | `interviewcraft init` | 初始化配置、目录和 SQLite | 幂等；保留已有配置 |
 | `interviewcraft setup` | 选择部署档位并验证 Provider、SQLite 与可选 Runner | 可恢复；凭据不写入配置或参数 |
 | `interviewcraft doctor` | 检查数据目录、SQLite、终端、Provider、可选 Runner | 阻塞错误返回 1；Runner disabled 只警告 |
+| `interviewcraft version [--json]` | 输出 schema、版本、commit、构建时间与平台 | 源码构建显示 `dev/unknown`；发行构建由 ldflags 注入 |
 | `interviewcraft run` | 启动完整常驻 TUI | 需要交互终端；单帧使用 `run --once` |
 | `interviewcraft export` | 导出迁移包或单份报告 | 默认不包含 Coach 原文，不覆盖已有文件 |
 | `interviewcraft import` | 导入完整迁移包 | 目标必须已初始化且没有训练数据 |

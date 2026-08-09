@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +37,7 @@ func TestRunHelpListsOrderedCommandPlaceholders(t *testing.T) {
 
 	output := stdout.String()
 	lastIndex := -1
-	for _, name := range []string{"init", "setup", "run", "doctor", "export", "import"} {
+	for _, name := range []string{"init", "setup", "run", "doctor", "version", "export", "import"} {
 		index := strings.Index(output, name)
 		if index == -1 {
 			t.Errorf("help output does not contain %q", name)
@@ -46,6 +47,38 @@ func TestRunHelpListsOrderedCommandPlaceholders(t *testing.T) {
 			t.Errorf("help command %q is out of order", name)
 		}
 		lastIndex = index
+	}
+}
+
+func TestVersionPlainAndJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Run([]string{"version"}, &stdout, &stderr); code != ExitOK || stderr.Len() != 0 {
+		t.Fatalf("plain exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for _, fragment := range []string{"InterviewCraft dev", "interviewcraft-version-v1", "commit: unknown", "platform:"} {
+		if !strings.Contains(stdout.String(), fragment) {
+			t.Fatalf("plain output missing %q: %q", fragment, stdout.String())
+		}
+	}
+	stdout.Reset()
+	if code := Run([]string{"version", "--json"}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("json exit=%d stderr=%q", code, stderr.String())
+	}
+	var info map[string]string
+	if err := json.Unmarshal(stdout.Bytes(), &info); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if info["schema_version"] != "interviewcraft-version-v1" || info["version"] != "dev" || info["goos"] == "" || info["goarch"] == "" || len(info) != 6 {
+		t.Fatalf("info=%v", info)
+	}
+}
+
+func TestVersionRejectsUnknownOptions(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Run([]string{"version", "--yaml"}, &stdout, &stderr); code != ExitUsage || !strings.Contains(stderr.String(), "version [--json]") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 

@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"github.com/interviewcraft/interviewcraft/internal/tui/app"
 	"github.com/interviewcraft/interviewcraft/internal/tui/screens/training"
 	"github.com/interviewcraft/interviewcraft/internal/tui/theme"
+	buildversion "github.com/interviewcraft/interviewcraft/internal/version"
 )
 
 const (
@@ -51,6 +53,7 @@ var commands = []command{
 	{name: "setup", description: "Configure and validate a complete local deployment"},
 	{name: "run", description: "Start the InterviewCraft terminal UI"},
 	{name: "doctor", description: "Check local runtime dependencies"},
+	{name: "version", description: "Print build and platform metadata"},
 	{name: "export", description: "Export reports or local training data"},
 	{name: "import", description: "Import a local transfer package"},
 }
@@ -111,6 +114,7 @@ func RunWithIO(args []string, terminal TerminalIO) int {
 		if len(args) > 1 &&
 			candidate.name != "run" &&
 			candidate.name != "setup" &&
+			candidate.name != "version" &&
 			candidate.name != "export" &&
 			candidate.name != "import" {
 			fmt.Fprintf(
@@ -136,6 +140,8 @@ func RunWithIO(args []string, terminal TerminalIO) int {
 			return runTraining(args[1:], terminal)
 		case "doctor":
 			return runDoctor(stdout, stderr)
+		case "version":
+			return runVersion(args[1:], stdout, stderr)
 		case "export":
 			return runExport(args[1:], stdout, stderr)
 		case "import":
@@ -378,6 +384,33 @@ func safeFilePart(value string) string {
 		}
 	}
 	return result.String()
+}
+
+func runVersion(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("version", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	jsonOutput := flags.Bool("json", false, "print JSON build metadata")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "! 无法解析 version 选项。")
+		fmt.Fprintln(stderr, "  使用 `interviewcraft version [--json]`。")
+		return ExitUsage
+	}
+	info := buildversion.Current()
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(info); err != nil {
+			fmt.Fprintln(stderr, "! 无法写出版本信息。")
+			return ExitFailure
+		}
+		return ExitOK
+	}
+	fmt.Fprintf(stdout, "InterviewCraft %s\n", info.Version)
+	fmt.Fprintf(stdout, "schema: %s\n", info.SchemaVersion)
+	fmt.Fprintf(stdout, "commit: %s\n", info.GitCommit)
+	fmt.Fprintf(stdout, "built: %s\n", info.BuildTime)
+	fmt.Fprintf(stdout, "platform: %s/%s\n", info.GOOS, info.GOARCH)
+	return ExitOK
 }
 
 func runSetup(args []string, terminal TerminalIO) int {
