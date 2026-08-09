@@ -195,7 +195,7 @@ func TestRunTrainingHomeAfterInit(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run(
-		[]string{"run", "--ascii", "--reduce-motion", "--no-color"},
+		[]string{"run", "--once", "--ascii", "--reduce-motion", "--no-color"},
 		&stdout,
 		&stderr,
 	)
@@ -235,7 +235,7 @@ func TestRunTrainingHomeWithoutInitShowsRecovery(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"run", "--no-color"}, &stdout, &stderr)
+	code := Run([]string{"run", "--once", "--no-color"}, &stdout, &stderr)
 
 	if code != ExitFailure {
 		t.Fatalf("run exit=%d, want %d", code, ExitFailure)
@@ -260,6 +260,21 @@ func TestRunTrainingHomeRejectsUnknownOption(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "interviewcraft run --help") {
 		t.Fatalf("run stderr=%q", stderr.String())
+	}
+}
+
+func TestRunInteractiveRejectsRedirectedStreams(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := Run([]string{"run", "--no-color"}, &stdout, &stderr)
+
+	if code != ExitFailure {
+		t.Fatalf("run exit=%d, want %d", code, ExitFailure)
+	}
+	if !strings.Contains(stderr.String(), "run --once") ||
+		!strings.Contains(stderr.String(), "交互终端") {
+		t.Fatalf("run stderr is not actionable: %q", stderr.String())
 	}
 }
 

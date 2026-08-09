@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/interviewcraft/interviewcraft/internal/adapters/resume"
 	"github.com/interviewcraft/interviewcraft/internal/core/async"
@@ -286,6 +287,50 @@ func (model *Model) UpdateActive(value string) error {
 		return fmt.Errorf("focused profile list is not a text field")
 	}
 	return nil
+}
+
+// InsertText appends printable or pasted text to the active editable field.
+// Choice fields continue to be changed with their existing navigation keys.
+func (model *Model) InsertText(value string) error {
+	if model == nil || value == "" {
+		return nil
+	}
+	current, editable := model.activeText()
+	if !editable {
+		return nil
+	}
+	return model.UpdateActive(current + value)
+}
+
+// Backspace removes one complete UTF-8 rune from the active editable field.
+func (model *Model) Backspace() error {
+	if model == nil {
+		return nil
+	}
+	current, editable := model.activeText()
+	if !editable || current == "" {
+		return nil
+	}
+	_, size := utf8.DecodeLastRuneInString(current)
+	return model.UpdateActive(current[:len(current)-size])
+}
+
+func (model *Model) activeText() (string, bool) {
+	if model.editID != "" {
+		return model.editBuffer, true
+	}
+	switch model.focus.Active() {
+	case focusFile:
+		return model.form.FilePath, true
+	case focusPaste:
+		return model.form.Paste, true
+	case focusRole:
+		return model.form.Role, true
+	case focusJD:
+		return model.form.JD, true
+	default:
+		return "", false
+	}
 }
 
 // Resize changes geometry without clearing the form, focus, profile, or edit.

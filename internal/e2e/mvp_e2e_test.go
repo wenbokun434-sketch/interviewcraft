@@ -48,7 +48,7 @@ func TestLiteMVPJourneyFromFreshInitThroughTransfer(t *testing.T) {
 
 	runCLI(t, []string{"init"})
 	runCLI(t, []string{"doctor"})
-	home := runCLI(t, []string{"run", "--ascii", "--reduce-motion", "--no-color"})
+	home := runCLI(t, []string{"run", "--once", "--ascii", "--reduce-motion", "--no-color"})
 	assertFrame(t, home, 80, 24)
 
 	store, err := db.Open(ctx, db.Config{DataDir: sourceDir}, nil)
@@ -375,7 +375,7 @@ func TestLiteMVPJourneyFromFreshInitThroughTransfer(t *testing.T) {
 	if err != nil || !found || restoredNext.Status != db.SessionActive {
 		t.Fatalf("restored next session found=%v session=%#v err=%v", found, restoredNext, err)
 	}
-	restoredHome := runCLI(t, []string{"run", "--ascii", "--reduce-motion", "--no-color"})
+	restoredHome := runCLI(t, []string{"run", "--once", "--ascii", "--reduce-motion", "--no-color"})
 	assertFrame(t, restoredHome, 80, 24)
 }
 

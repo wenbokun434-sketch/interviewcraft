@@ -36,7 +36,7 @@ Lite 版本采用单个 Go 二进制文件和内嵌 SQLite：
 
 MVP 的领域服务、SQLite 持久化、P-01～P-07 屏幕模型、三语言 Runner、隔离攻击测试、证据化报告和完整 E2E 已实现并具有自动化测试。
 
-需要特别说明：当前命令行入口中的 `interviewcraft run` 会加载 SQLite、渲染一次训练主页到标准输出，然后退出；它尚未接入常驻终端事件循环。因此：
+`interviewcraft run` 现在会启动常驻终端事件循环，并要求 stdin/stdout 都是交互终端。CI、脚本或重定向输出请使用 `interviewcraft run --once` 渲染单帧。因此：
 
 - `init`、`doctor`、`run` 的单次渲染、`export` 和 `import` 可以直接使用；
 - 各训练屏幕的键盘交互和完整业务闭环目前由屏幕模型及 E2E 自动化验证；
@@ -173,7 +173,7 @@ interviewcraft run
 兼容能力有限的终端可以使用：
 
 ```powershell
-interviewcraft run --ascii --reduce-motion --no-color
+interviewcraft run --once --ascii --reduce-motion --no-color
 ```
 
 如“当前实现状态”所述，现阶段该命令渲染一次主页后退出。
@@ -343,7 +343,7 @@ interviewcraft <command>
 | --- | --- | --- |
 | `interviewcraft init` | 初始化配置、目录和 SQLite | 幂等；保留已有配置 |
 | `interviewcraft doctor` | 检查数据目录、SQLite、终端、Provider、可选 Runner | 阻塞错误返回 1；Runner disabled 只警告 |
-| `interviewcraft run` | 加载并渲染训练主页 | 当前渲染一次后退出 |
+| `interviewcraft run` | 启动完整常驻 TUI | 需要交互终端；单帧使用 `run --once` |
 | `interviewcraft export` | 导出迁移包或单份报告 | 默认不包含 Coach 原文，不覆盖已有文件 |
 | `interviewcraft import` | 导入完整迁移包 | 目标必须已初始化且没有训练数据 |
 

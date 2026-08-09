@@ -14,12 +14,14 @@ import (
 	"time"
 	"unicode"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/interviewcraft/interviewcraft/internal/config"
 	"github.com/interviewcraft/interviewcraft/internal/core/async"
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
 	"github.com/interviewcraft/interviewcraft/internal/core/transfer"
 	"github.com/interviewcraft/interviewcraft/internal/db"
 	"github.com/interviewcraft/interviewcraft/internal/doctor"
+	"github.com/interviewcraft/interviewcraft/internal/tui/app"
 	"github.com/interviewcraft/interviewcraft/internal/tui/screens/training"
 	"github.com/interviewcraft/interviewcraft/internal/tui/theme"
 )
@@ -51,6 +53,41 @@ var commands = []command{
 
 // Run handles one InterviewCraft command and returns a process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
+	return RunWithIO(args, TerminalIO{
+		Stdin: strings.NewReader(""), Stdout: stdout, Stderr: stderr,
+	})
+}
+
+// TerminalIO makes stdin and terminal capability deterministic for tests.
+type TerminalIO struct {
+	Stdin       io.Reader
+	Stdout      io.Writer
+	Stderr      io.Writer
+	Interactive bool
+}
+
+// RunOS uses real process streams and detects whether Bubble Tea can safely
+// take ownership of the terminal.
+func RunOS(args []string, stdin *os.File, stdout *os.File, stderr io.Writer) int {
+	return RunWithIO(args, TerminalIO{
+		Stdin: stdin, Stdout: stdout, Stderr: stderr,
+		Interactive: isTerminalFile(stdin) && isTerminalFile(stdout),
+	})
+}
+
+// RunWithIO handles one command using injected process streams.
+func RunWithIO(args []string, terminal TerminalIO) int {
+	stdout := terminal.Stdout
+	stderr := terminal.Stderr
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	if terminal.Stdin == nil {
+		terminal.Stdin = strings.NewReader("")
+	}
 	if len(args) == 0 || isHelp(args[0]) {
 		writeHelp(stdout)
 		return ExitOK
@@ -83,7 +120,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		case "init":
 			return runInit(stdout, stderr)
 		case "run":
-			return runTraining(args[1:], stdout, stderr)
+			terminal.Stdout = stdout
+			terminal.Stderr = stderr
+			return runTraining(args[1:], terminal)
 		case "doctor":
 			return runDoctor(stdout, stderr)
 		case "export":
@@ -139,6 +178,7 @@ func writeCommandHelp(output io.Writer, target command) {
 		fmt.Fprintln(output, "  --reduce-motion")
 		fmt.Fprintln(output, "  --ansi-16")
 		fmt.Fprintln(output, "  --no-color")
+		fmt.Fprintln(output, "  --once              Render one frame for CI or redirected output")
 	}
 	if target.name == "export" {
 		fmt.Fprintln(output)
@@ -314,7 +354,140 @@ func safeFilePart(value string) string {
 	return result.String()
 }
 
-func runTraining(args []string, stdout, stderr io.Writer) int {
+func runTraining(args []string, terminal TerminalIO) int {
+	stdout, stderr := terminal.Stdout, terminal.Stderr
+	themeArgs, once, err := parseRunMode(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "! 无法解析 run 选项：%s。\n", err)
+		fmt.Fprintln(stderr, "  运行 `interviewcraft run --help` 查看可用选项。")
+		return ExitUsage
+	}
+	options, err := theme.ParseOptions(themeArgs)
+	if err != nil {
+		fmt.Fprintf(stderr, "! 无法解析 run 选项：%s。\n", err)
+		fmt.Fprintln(stderr, "  运行 `interviewcraft run --help` 查看可用选项。")
+		return ExitUsage
+	}
+	if !once && !terminal.Interactive {
+		fmt.Fprintln(stderr, "! `interviewcraft run` 需要可交互终端。")
+		fmt.Fprintln(stderr, "  在终端中运行，或为 CI/重定向输出使用 `interviewcraft run --once`。")
+		return ExitFailure
+	}
+	current, err := theme.Resolve(options)
+	if err != nil {
+		writeCommandError(stderr, domainerr.Wrap(
+			domainerr.CodeValidation,
+			"resolve TUI theme",
+			"terminal",
+			"无法应用终端主题。",
+			"检查 run 选项后重试。",
+			false,
+			err,
+		))
+		return ExitFailure
+	}
+
+	runtimeConfig, metadata, err := config.LoadOS()
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	if !metadata.Exists {
+		fmt.Fprintln(stderr, "! 尚未初始化 InterviewCraft 配置。")
+		fmt.Fprintln(stderr, "  运行 `interviewcraft init` 或 `interviewcraft setup` 后重试。")
+		return ExitFailure
+	}
+	store, err := db.Open(context.Background(), db.Config{
+		DataDir: runtimeConfig.DataDir, DatabaseName: runtimeConfig.DatabaseName,
+	}, nil)
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	closeStore := func() int {
+		if closeErr := store.Close(); closeErr != nil {
+			writeCommandError(stderr, domainerr.Wrap(
+				domainerr.CodePersistenceFailed,
+				"close TUI storage",
+				"SQLite",
+				"无法确认本地数据已安全关闭。",
+				"检查数据库文件后重试。",
+				true,
+				closeErr,
+			))
+			return ExitFailure
+		}
+		return ExitOK
+	}
+	factory, err := app.NewRuntimeFactory(runtimeConfig, metadata.Path, store, current)
+	if err != nil {
+		_ = store.Close()
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	model, err := app.New(factory, app.Route{
+		Page: app.PageTraining, ProfileID: "default",
+	}, terminalDimension("COLUMNS", 120), terminalDimension("LINES", 36))
+	if err != nil {
+		_ = store.Close()
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	if once {
+		if err := model.RunOnce(context.Background()); err != nil {
+			_ = store.Close()
+			writeCommandError(stderr, err)
+			return ExitFailure
+		}
+		fmt.Fprintln(stdout, model.View().Content)
+		return closeStore()
+	}
+	program := tea.NewProgram(
+		model,
+		tea.WithInput(terminal.Stdin),
+		tea.WithOutput(stdout),
+	)
+	if _, err := program.Run(); err != nil {
+		_ = store.Close()
+		writeCommandError(stderr, domainerr.Wrap(
+			domainerr.CodeDependencyUnavailable,
+			"run interactive TUI",
+			"terminal",
+			"交互终端异常退出。",
+			"确认终端支持交互输入后重试；自动化环境使用 `run --once`。",
+			true,
+			err,
+		))
+		return ExitFailure
+	}
+	return closeStore()
+}
+
+func parseRunMode(args []string) ([]string, bool, error) {
+	result := make([]string, 0, len(args))
+	once := false
+	for _, arg := range args {
+		if arg != "--once" {
+			result = append(result, arg)
+			continue
+		}
+		if once {
+			return nil, false, errors.New("--once 不能重复")
+		}
+		once = true
+	}
+	return result, once, nil
+}
+
+func isTerminalFile(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func runTrainingLegacy(args []string, stdout, stderr io.Writer) int {
 	options, err := theme.ParseOptions(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "! 无法解析 run 选项：%s。\n", err)

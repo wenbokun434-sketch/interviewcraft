@@ -30,6 +30,15 @@ const (
 	focusHelp     = "help"
 )
 
+// TextTarget identifies the draft that receives printable input.
+type TextTarget string
+
+const (
+	TextTargetNone     TextTarget = ""
+	TextTargetComposer TextTarget = "composer"
+	TextTargetCoach    TextTarget = "coach"
+)
+
 // Stage identifies one visible interview-room operation.
 type Stage string
 
@@ -259,6 +268,23 @@ func (model *Model) Snapshot() coreinterview.Snapshot {
 	model.mu.RLock()
 	defer model.mu.RUnlock()
 	return cloneSnapshot(model.snapshot)
+}
+
+// ActiveTextTarget lets the root input adapter preserve focus and overlay
+// semantics without exposing mutable screen state.
+func (model *Model) ActiveTextTarget() TextTarget {
+	if model == nil {
+		return TextTargetNone
+	}
+	model.mu.RLock()
+	defer model.mu.RUnlock()
+	if model.coachOverlay && model.focus.Active() == focusCoach {
+		return TextTargetCoach
+	}
+	if model.focus.Active() == focusComposer {
+		return TextTargetComposer
+	}
+	return TextTargetNone
 }
 
 // Draft returns the preserved local answer buffer.

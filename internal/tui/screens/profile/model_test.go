@@ -139,6 +139,22 @@ func TestKeyboardFormPathParseEditLockDeleteAndSave(t *testing.T) {
 	}
 }
 
+func TestTextInputAdapterPreservesUTF8(t *testing.T) {
+	model, err := New(Options{Width: 80, Height: 24})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := model.InsertText("简历.txt"); err != nil {
+		t.Fatalf("InsertText: %v", err)
+	}
+	if err := model.Backspace(); err != nil {
+		t.Fatalf("Backspace: %v", err)
+	}
+	if got := model.Form().FilePath; got != "简历.tx" {
+		t.Fatalf("FilePath=%q", got)
+	}
+}
+
 func TestParseProgressCanCancelWithoutLosingInputOrCreatingProfile(t *testing.T) {
 	t.Parallel()
 

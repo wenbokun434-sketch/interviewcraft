@@ -56,7 +56,7 @@ try {
     }
 
     Invoke-NativeOutput -FilePath $resolvedBinary -Arguments @("init") | Out-Null
-    $run = Invoke-NativeOutput -FilePath $resolvedBinary -Arguments @("run", "--ascii", "--reduce-motion", "--no-color")
+    $run = Invoke-NativeOutput -FilePath $resolvedBinary -Arguments @("run", "--once", "--ascii", "--reduce-motion", "--no-color")
     if ($run.Count -ne 24 -or ($run -join "`n") -notmatch "InterviewCraft") {
         throw "fresh binary did not render a complete 80x24 Lite frame"
     }
