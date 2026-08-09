@@ -84,6 +84,28 @@ func LoadOS() (Runtime, Metadata, error) {
 	return Load(OSSource())
 }
 
+// LoadAt reads one data directory without applying process environment
+// overrides. It is used by setup to preserve fields the user did not
+// explicitly change when an existing workspace is configured again.
+func LoadAt(dataDir string) (Runtime, Metadata, error) {
+	absolute, err := filepath.Abs(strings.TrimSpace(dataDir))
+	if err != nil || strings.TrimSpace(dataDir) == "" {
+		return Runtime{}, Metadata{}, validationError(
+			"resolve setup data directory", dataDir,
+			"数据目录无效。", "提供有效的数据目录后重试。", err,
+		)
+	}
+	return Load(Source{
+		UserHomeDir: func() (string, error) { return filepath.Dir(absolute), nil },
+		LookupEnv: func(name string) (string, bool) {
+			if name == envDataDir {
+				return absolute, true
+			}
+			return "", false
+		},
+	})
+}
+
 // Load applies defaults, an optional strict JSON file, then environment
 // overrides. Missing configuration returns valid defaults with Exists=false.
 func Load(source Source) (Runtime, Metadata, error) {

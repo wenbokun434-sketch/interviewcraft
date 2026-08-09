@@ -73,6 +73,53 @@ func TestWriteInitialIsIdempotentAndStoresNoSecret(t *testing.T) {
 	}
 }
 
+func TestSaveAtomicReplacesConfigurationWithoutSecret(t *testing.T) {
+	home := t.TempDir()
+	runtime := defaults(filepath.Join(home, "data"))
+	path := filepath.Join(home, "config.json")
+	if err := SaveAtomic(path, runtime); err != nil {
+		t.Fatalf("SaveAtomic first: %v", err)
+	}
+	runtime.LLM = LLM{
+		Provider: ProviderOllama, Endpoint: "http://localhost:11434",
+		Model: "local-model", APIKeyEnv: "OPENAI_API_KEY",
+	}
+	if err := SaveAtomic(path, runtime); err != nil {
+		t.Fatalf("SaveAtomic replace: %v", err)
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(payload), "local-model") ||
+		strings.Contains(string(payload), "actual-secret-value") {
+		t.Fatalf("payload=%s", payload)
+	}
+	if matches, err := filepath.Glob(filepath.Join(home, ".config-*.tmp")); err != nil || len(matches) != 0 {
+		t.Fatalf("temporary files=%v err=%v", matches, err)
+	}
+}
+
+func TestLoadAtIgnoresProcessOverridesAndReadsRequestedDirectory(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), "workspace")
+	runtime := defaults(dataDir)
+	runtime.LLM = LLM{
+		Provider: ProviderOllama, Endpoint: "http://127.0.0.1:11434",
+		Model: "local-preserved", APIKeyEnv: "OPENAI_API_KEY",
+	}
+	if err := SaveAtomic(filepath.Join(dataDir, ConfigFileName), runtime); err != nil {
+		t.Fatalf("SaveAtomic: %v", err)
+	}
+	t.Setenv(envLLMProvider, ProviderOpenAICompatible)
+	loaded, metadata, err := LoadAt(dataDir)
+	if err != nil {
+		t.Fatalf("LoadAt: %v", err)
+	}
+	if !metadata.Exists || loaded.LLM.Provider != ProviderOllama || loaded.LLM.Model != "local-preserved" {
+		t.Fatalf("loaded=%#v metadata=%#v", loaded, metadata)
+	}
+}
+
 func TestEnvironmentOverridesStrictFile(t *testing.T) {
 	t.Parallel()
 

@@ -36,13 +36,9 @@ Lite 版本采用单个 Go 二进制文件和内嵌 SQLite：
 
 MVP 的领域服务、SQLite 持久化、P-01～P-07 屏幕模型、三语言 Runner、隔离攻击测试、证据化报告和完整 E2E 已实现并具有自动化测试。
 
-`interviewcraft run` 现在会启动常驻终端事件循环，并要求 stdin/stdout 都是交互终端。CI、脚本或重定向输出请使用 `interviewcraft run --once` 渲染单帧。因此：
+`interviewcraft run` 现在会启动常驻终端事件循环，并要求 stdin/stdout 都是交互终端。CI、脚本或重定向输出请使用 `interviewcraft run --once` 渲染单帧。
 
-- `init`、`doctor`、`run` 的单次渲染、`export` 和 `import` 可以直接使用；
-- 各训练屏幕的键盘交互和完整业务闭环目前由屏幕模型及 E2E 自动化验证；
-- 不应把当前二进制描述为已经可以从 `run` 中完成整场常驻交互训练。
-
-这一限制不会影响数据格式、部署方式、迁移命令或 Runner 隔离边界，但会影响最终用户通过单一命令进入完整交互流程。
+`setup`、`init`、`doctor`、完整常驻 `run`、`export` 和 `import` 均可直接使用。训练屏幕通过同一事件循环完成完整业务闭环；退出后仍保留已经持久化的训练状态与草稿。
 
 ## 功能概览
 
@@ -144,13 +140,31 @@ go build -trimpath -o ./bin/interviewcraft ./cmd/interviewcraft
 $env:INTERVIEWCRAFT_DATA_DIR = "D:\InterviewCraftData"
 ```
 
-### 2. 初始化 Lite
+### 2. 一键配置 Lite
 
 ```powershell
-interviewcraft init
+$env:INTERVIEWCRAFT_API_KEY = "<你的密钥>"
+interviewcraft setup --profile lite `
+  --provider openai-compatible `
+  --endpoint https://provider.example/v1 `
+  --model model-name `
+  --api-key-env INTERVIEWCRAFT_API_KEY `
+  --non-interactive
 ```
 
-`init` 可以重复执行。它不会覆盖已有配置，会创建或迁移 SQLite，并准备上传、导出和日志目录。
+交互终端中省略 `--non-interactive` 会使用隐藏输入读取 API Key，并将其保存到系统凭据库。自动化中也可通过 `--api-key-stdin` 从标准输入读取；不支持 `--api-key <value>`，因此密钥不会进入进程参数。`setup` 可以重复执行，并会保留没有显式更改的现有 Provider 字段。
+
+只需本地 Ollama 时：
+
+```powershell
+interviewcraft setup --profile private-local `
+  --provider ollama `
+  --endpoint http://127.0.0.1:11434 `
+  --model llama3.2 `
+  --non-interactive
+```
+
+已有脚本仍可继续使用幂等的 `interviewcraft init`；它不会覆盖已有配置。
 
 ### 3. 配置模型 Provider
 
@@ -187,7 +201,7 @@ InterviewCraft 支持两种 Provider 类型：
 - `openai-compatible`：兼容 OpenAI `/models` 和 `/chat/completions` 风格的服务；
 - `ollama`：使用 Ollama `/api/tags` 和 `/api/chat` 接口。
 
-API Key 的值只从进程环境变量读取。`config.json` 保存的是“密钥所在环境变量的名称”，不会保存密钥值。
+API Key 的解析顺序为环境变量优先、系统凭据库其次。系统凭据库使用 Windows Credential Manager、macOS Keychain 或 Linux Secret Service；不可用时 setup 会明确要求环境变量，不会明文降级。`config.json` 只保存“密钥所在环境变量的名称”，不会保存密钥值。
 
 ### OpenAI-compatible：Windows PowerShell
 
@@ -342,6 +356,7 @@ interviewcraft <command>
 | 命令 | 作用 | 重要行为 |
 | --- | --- | --- |
 | `interviewcraft init` | 初始化配置、目录和 SQLite | 幂等；保留已有配置 |
+| `interviewcraft setup` | 选择部署档位并验证 Provider、SQLite 与可选 Runner | 可恢复；凭据不写入配置或参数 |
 | `interviewcraft doctor` | 检查数据目录、SQLite、终端、Provider、可选 Runner | 阻塞错误返回 1；Runner disabled 只警告 |
 | `interviewcraft run` | 启动完整常驻 TUI | 需要交互终端；单帧使用 `run --once` |
 | `interviewcraft export` | 导出迁移包或单份报告 | 默认不包含 Coach 原文，不覆盖已有文件 |
@@ -351,6 +366,7 @@ interviewcraft <command>
 
 ```powershell
 interviewcraft --help
+interviewcraft setup --help
 interviewcraft run --help
 interviewcraft export --help
 interviewcraft import --help
@@ -424,7 +440,7 @@ interviewcraft run --ascii --reduce-motion --no-color
 - 代码工作台使用 `Ctrl+1/2/3` 切换 Python、JavaScript、Java；
 - 代码工作台使用 `Ctrl+S/F/Z/R/E/H` 完成保存、格式化、重置、运行、解释错误和返回面试。
 
-由于当前 `run` 尚未接入常驻事件循环，上述交互目前用于屏幕模型与自动化验收，不能全部从发布二进制入口到达。
+上述交互均由 `interviewcraft run` 的常驻事件循环接入，并由脚本化全链路测试覆盖。
 
 ## 本地数据目录
 
@@ -433,6 +449,7 @@ interviewcraft run --ascii --reduce-motion --no-color
 ```text
 ~/.interviewcraft/
 ├─ config.json             # 非敏感运行配置
+├─ setup-state.json         # 仅在未完成 setup 时存在，不含密钥
 ├─ interviewcraft.db       # SQLite 训练数据
 ├─ uploads/                # 本地导入材料
 ├─ exports/                # 默认导出位置

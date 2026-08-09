@@ -21,6 +21,7 @@ import (
 	corereport "github.com/interviewcraft/interviewcraft/internal/core/report"
 	corescenario "github.com/interviewcraft/interviewcraft/internal/core/scenario"
 	"github.com/interviewcraft/interviewcraft/internal/core/transfer"
+	"github.com/interviewcraft/interviewcraft/internal/credentials"
 	"github.com/interviewcraft/interviewcraft/internal/db"
 	"github.com/interviewcraft/interviewcraft/internal/tui/screens/coding"
 	interviewscreen "github.com/interviewcraft/interviewcraft/internal/tui/screens/interview"
@@ -60,10 +61,16 @@ func NewRuntimeFactory(
 	if store == nil {
 		return nil, errors.New("runtime store is nil")
 	}
+	secretResolver, err := credentials.NewResolver(
+		runtime.DataDir, os.LookupEnv, credentials.SystemStore{},
+	)
+	if err != nil {
+		return nil, err
+	}
 	var generator *llmadapter.Client
 	if strings.TrimSpace(runtime.LLM.Provider) != "" {
 		client, err := llmadapter.New(runtime.LLM, llmadapter.Options{
-			ResolveSecret: os.LookupEnv,
+			ResolveSecret: secretResolver.Resolve,
 		})
 		if err != nil {
 			return nil, err
@@ -169,7 +176,16 @@ func (factory *RuntimeFactory) Open(route Route, width, height int) (Screen, err
 		model, err := settings.New(settings.Options{
 			Runtime: factory.runtime,
 			TesterFactory: func(value config.LLM) (settings.ConnectionTester, error) {
-				return llmadapter.New(value, llmadapter.Options{ResolveSecret: os.LookupEnv})
+				resolver, resolverErr := credentials.NewResolver(
+					factory.runtime.DataDir, os.LookupEnv, credentials.SystemStore{},
+				)
+				if resolverErr != nil {
+					return nil, resolverErr
+				}
+				return llmadapter.New(value, llmadapter.Options{ResolveSecret: resolver.Resolve})
+			},
+			SaveConfig: func(value config.Runtime) error {
+				return config.SaveAtomic(factory.configPath, value)
 			},
 			Data: factory.transfer, Width: width, Height: height, Theme: factory.theme,
 		})

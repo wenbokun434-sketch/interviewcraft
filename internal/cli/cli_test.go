@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/interviewcraft/interviewcraft/internal/config"
 	"github.com/interviewcraft/interviewcraft/internal/core/contracts"
 	"github.com/interviewcraft/interviewcraft/internal/db"
 	"github.com/interviewcraft/interviewcraft/internal/tui/layout"
+	keyring "github.com/zalando/go-keyring"
 )
 
 func TestRunHelpListsOrderedCommandPlaceholders(t *testing.T) {
@@ -33,7 +36,7 @@ func TestRunHelpListsOrderedCommandPlaceholders(t *testing.T) {
 
 	output := stdout.String()
 	lastIndex := -1
-	for _, name := range []string{"init", "run", "doctor", "export", "import"} {
+	for _, name := range []string{"init", "setup", "run", "doctor", "export", "import"} {
 		index := strings.Index(output, name)
 		if index == -1 {
 			t.Errorf("help output does not contain %q", name)
@@ -43,6 +46,175 @@ func TestRunHelpListsOrderedCommandPlaceholders(t *testing.T) {
 			t.Errorf("help command %q is out of order", name)
 		}
 		lastIndex = index
+	}
+}
+
+func TestSetupPrivateLocalNonInteractive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/tags" {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"models":[]}`))
+	}))
+	defer server.Close()
+	dataDir := filepath.Join(t.TempDir(), "data")
+	t.Setenv("COLUMNS", "120")
+	t.Setenv("LINES", "36")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := RunWithIO([]string{
+		"setup", "--profile", "private-local", "--data-dir", dataDir,
+		"--provider", "ollama", "--endpoint", server.URL,
+		"--model", "local-test", "--non-interactive",
+	}, TerminalIO{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr})
+	if code != ExitOK {
+		t.Fatalf("setup exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[7/7]") || stderr.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "config.json")); err != nil {
+		t.Fatalf("config missing: %v", err)
+	}
+}
+
+func TestSetupAPIKeyStdinNeverLeaks(t *testing.T) {
+	keyring.MockInit()
+	const secret = "stdin-super-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/models" || request.Header.Get("Authorization") != "Bearer "+secret {
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"data":[]}`))
+	}))
+	defer server.Close()
+	dataDir := filepath.Join(t.TempDir(), "data")
+	t.Setenv("COLUMNS", "120")
+	t.Setenv("LINES", "36")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := RunWithIO([]string{
+		"setup", "--profile", "lite", "--data-dir", dataDir,
+		"--provider", "openai-compatible", "--endpoint", server.URL,
+		"--model", "remote-test", "--api-key-stdin", "--non-interactive",
+	}, TerminalIO{Stdin: strings.NewReader(secret + "\n"), Stdout: &stdout, Stderr: &stderr})
+	if code != ExitOK {
+		t.Fatalf("setup exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	payload, err := os.ReadFile(filepath.Join(dataDir, "config.json"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	combined := stdout.String() + stderr.String() + string(payload)
+	if strings.Contains(combined, secret) {
+		t.Fatalf("secret leaked in setup output/config: %q", combined)
+	}
+}
+
+func TestSetupRejectsAPIKeyArgument(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"setup", "--api-key", "must-not-appear"}, &stdout, &stderr)
+	if code != ExitUsage || strings.Contains(stdout.String(), "must-not-appear") || strings.Contains(stderr.String(), "must-not-appear") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestSetupNonInteractiveMissingCredentialIsUsageError(t *testing.T) {
+	keyring.MockInit()
+	dataDir := filepath.Join(t.TempDir(), "missing")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := RunWithIO([]string{
+		"setup", "--profile", "lite", "--data-dir", dataDir, "--non-interactive",
+	}, TerminalIO{Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr})
+	if code != ExitUsage || !strings.Contains(stderr.String(), "OPENAI_API_KEY") || !strings.Contains(stderr.String(), "--api-key-stdin") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, config.ConfigFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("partial configuration exists: %v", err)
+	}
+}
+
+func TestSetupInteractiveUsesHiddenInputAndDoesNotLeak(t *testing.T) {
+	keyring.MockInit()
+	const secret = "hidden-interactive-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer "+secret {
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"data":[]}`))
+	}))
+	defer server.Close()
+	dataDir := filepath.Join(t.TempDir(), "interactive")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	passwordCalls := 0
+	code := RunWithIO([]string{
+		"setup", "--profile", "lite", "--data-dir", dataDir,
+		"--endpoint", server.URL, "--model", "interactive-test",
+	}, TerminalIO{
+		Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr,
+		Interactive: true,
+		ReadPassword: func() ([]byte, error) {
+			passwordCalls++
+			return []byte(secret), nil
+		},
+	})
+	if code != ExitOK || passwordCalls != 1 {
+		t.Fatalf("exit=%d calls=%d stdout=%q stderr=%q", code, passwordCalls, stdout.String(), stderr.String())
+	}
+	payload, err := os.ReadFile(filepath.Join(dataDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if combined := stdout.String() + stderr.String() + string(payload); strings.Contains(combined, secret) {
+		t.Fatalf("interactive secret leaked: %q", combined)
+	}
+}
+
+func TestSetupRepeatPreservesImplicitProviderFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"models":[]}`))
+	}))
+	defer server.Close()
+	dataDir := filepath.Join(t.TempDir(), "repeat")
+	run := func(args ...string) (int, string) {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := RunWithIO(append([]string{"setup"}, args...), TerminalIO{
+			Stdin: strings.NewReader(""), Stdout: &stdout, Stderr: &stderr,
+		})
+		return code, stdout.String() + stderr.String()
+	}
+	code, output := run(
+		"--profile", "private-local", "--data-dir", dataDir,
+		"--endpoint", server.URL, "--model", "keep-me", "--non-interactive",
+	)
+	if code != ExitOK {
+		t.Fatalf("first exit=%d output=%q", code, output)
+	}
+	first, err := os.ReadFile(filepath.Join(dataDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile first: %v", err)
+	}
+	code, output = run("--data-dir", dataDir, "--non-interactive")
+	if code != ExitOK {
+		t.Fatalf("second exit=%d output=%q", code, output)
+	}
+	second, err := os.ReadFile(filepath.Join(dataDir, config.ConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile second: %v", err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("implicit fields changed\nfirst=%s\nsecond=%s", first, second)
 	}
 }
 

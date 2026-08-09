@@ -15,12 +15,15 @@ import (
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
+	term "github.com/charmbracelet/x/term"
 	"github.com/interviewcraft/interviewcraft/internal/config"
 	"github.com/interviewcraft/interviewcraft/internal/core/async"
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
 	"github.com/interviewcraft/interviewcraft/internal/core/transfer"
+	"github.com/interviewcraft/interviewcraft/internal/credentials"
 	"github.com/interviewcraft/interviewcraft/internal/db"
 	"github.com/interviewcraft/interviewcraft/internal/doctor"
+	setupservice "github.com/interviewcraft/interviewcraft/internal/setup"
 	"github.com/interviewcraft/interviewcraft/internal/tui/app"
 	"github.com/interviewcraft/interviewcraft/internal/tui/screens/training"
 	"github.com/interviewcraft/interviewcraft/internal/tui/theme"
@@ -45,6 +48,7 @@ type command struct {
 
 var commands = []command{
 	{name: "init", description: "Initialize a local Lite workspace"},
+	{name: "setup", description: "Configure and validate a complete local deployment"},
 	{name: "run", description: "Start the InterviewCraft terminal UI"},
 	{name: "doctor", description: "Check local runtime dependencies"},
 	{name: "export", description: "Export reports or local training data"},
@@ -60,10 +64,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 // TerminalIO makes stdin and terminal capability deterministic for tests.
 type TerminalIO struct {
-	Stdin       io.Reader
-	Stdout      io.Writer
-	Stderr      io.Writer
-	Interactive bool
+	Stdin        io.Reader
+	Stdout       io.Writer
+	Stderr       io.Writer
+	Interactive  bool
+	ReadPassword func() ([]byte, error)
 }
 
 // RunOS uses real process streams and detects whether Bubble Tea can safely
@@ -71,7 +76,8 @@ type TerminalIO struct {
 func RunOS(args []string, stdin *os.File, stdout *os.File, stderr io.Writer) int {
 	return RunWithIO(args, TerminalIO{
 		Stdin: stdin, Stdout: stdout, Stderr: stderr,
-		Interactive: isTerminalFile(stdin) && isTerminalFile(stdout),
+		Interactive:  isTerminalFile(stdin) && isTerminalFile(stdout),
+		ReadPassword: func() ([]byte, error) { return term.ReadPassword(stdin.Fd()) },
 	})
 }
 
@@ -104,6 +110,7 @@ func RunWithIO(args []string, terminal TerminalIO) int {
 		}
 		if len(args) > 1 &&
 			candidate.name != "run" &&
+			candidate.name != "setup" &&
 			candidate.name != "export" &&
 			candidate.name != "import" {
 			fmt.Fprintf(
@@ -119,6 +126,10 @@ func RunWithIO(args []string, terminal TerminalIO) int {
 		switch candidate.name {
 		case "init":
 			return runInit(stdout, stderr)
+		case "setup":
+			terminal.Stdout = stdout
+			terminal.Stderr = stderr
+			return runSetup(args[1:], terminal)
 		case "run":
 			terminal.Stdout = stdout
 			terminal.Stderr = stderr
@@ -179,6 +190,21 @@ func writeCommandHelp(output io.Writer, target command) {
 		fmt.Fprintln(output, "  --ansi-16")
 		fmt.Fprintln(output, "  --no-color")
 		fmt.Fprintln(output, "  --once              Render one frame for CI or redirected output")
+	}
+	if target.name == "setup" {
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "Options:")
+		fmt.Fprintln(output, "  --profile lite|private-local|full")
+		fmt.Fprintln(output, "  --data-dir <path>")
+		fmt.Fprintln(output, "  --provider openai-compatible|ollama")
+		fmt.Fprintln(output, "  --endpoint <url>")
+		fmt.Fprintln(output, "  --model <name>")
+		fmt.Fprintln(output, "  --api-key-env <name>")
+		fmt.Fprintln(output, "  --api-key-stdin")
+		fmt.Fprintln(output, "  --non-interactive")
+		fmt.Fprintln(output, "  --restart")
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "API key values are never accepted as command-line arguments.")
 	}
 	if target.name == "export" {
 		fmt.Fprintln(output)
@@ -352,6 +378,157 @@ func safeFilePart(value string) string {
 		}
 	}
 	return result.String()
+}
+
+func runSetup(args []string, terminal TerminalIO) int {
+	defaults, _, err := config.LoadOS()
+	if err != nil {
+		writeCommandError(terminal.Stderr, err)
+		return ExitFailure
+	}
+	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	profileValue := flags.String("profile", "", "deployment profile")
+	dataDir := flags.String("data-dir", defaults.DataDir, "data directory")
+	provider := flags.String("provider", "", "Provider")
+	endpoint := flags.String("endpoint", "", "Provider endpoint")
+	model := flags.String("model", "", "Provider model")
+	apiKeyEnv := flags.String("api-key-env", "OPENAI_API_KEY", "API key environment variable")
+	apiKeyStdin := flags.Bool("api-key-stdin", false, "read API key from stdin")
+	nonInteractive := flags.Bool("non-interactive", false, "disable prompts")
+	restart := flags.Bool("restart", false, "discard safe setup checkpoint")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(terminal.Stderr, "! 无法解析 setup 选项；API Key 值不能放在命令行参数中。")
+		fmt.Fprintln(terminal.Stderr, "  运行 `interviewcraft setup --help` 查看用法。")
+		return ExitUsage
+	}
+	explicit := make(map[string]bool)
+	flags.Visit(func(item *flag.Flag) { explicit[item.Name] = true })
+	existing, metadata, loadErr := config.LoadAt(*dataDir)
+	if loadErr != nil {
+		writeCommandError(terminal.Stderr, loadErr)
+		return ExitFailure
+	}
+	if metadata.Exists {
+		if !explicit["profile"] {
+			switch {
+			case existing.RunnerMode == config.RunnerDocker:
+				*profileValue = string(setupservice.ProfileFull)
+			case existing.LLM.Provider == config.ProviderOllama:
+				*profileValue = string(setupservice.ProfilePrivateLocal)
+			default:
+				*profileValue = string(setupservice.ProfileLite)
+			}
+		}
+		profileChangesProvider := explicit["profile"] && !explicit["provider"]
+		if !explicit["provider"] && !profileChangesProvider {
+			*provider = existing.LLM.Provider
+		}
+		resolvedExistingProvider := strings.TrimSpace(*provider)
+		if resolvedExistingProvider == "" {
+			resolvedExistingProvider = existing.LLM.Provider
+		}
+		if resolvedExistingProvider == existing.LLM.Provider {
+			if !explicit["endpoint"] {
+				*endpoint = existing.LLM.Endpoint
+			}
+			if !explicit["model"] {
+				*model = existing.LLM.Model
+			}
+			if !explicit["api-key-env"] {
+				*apiKeyEnv = existing.LLM.APIKeyEnv
+			}
+		}
+	}
+	if strings.TrimSpace(*profileValue) == "" {
+		*profileValue = string(setupservice.ProfileLite)
+	}
+	profile := setupservice.Profile(strings.TrimSpace(*profileValue))
+	resolvedProvider := strings.TrimSpace(*provider)
+	if resolvedProvider == "" {
+		if profile == setupservice.ProfilePrivateLocal {
+			resolvedProvider = config.ProviderOllama
+		} else {
+			resolvedProvider = config.ProviderOpenAICompatible
+		}
+	}
+	if !*nonInteractive && !terminal.Interactive {
+		fmt.Fprintln(terminal.Stderr, "! 交互式 setup 需要终端输入。")
+		fmt.Fprintln(terminal.Stderr, "  使用交互终端，或添加 --non-interactive 并通过环境变量/--api-key-stdin 提供凭据。")
+		return ExitUsage
+	}
+
+	secret := ""
+	if *apiKeyStdin {
+		payload, readErr := io.ReadAll(io.LimitReader(terminal.Stdin, 64<<10))
+		if readErr != nil || len(payload) >= 64<<10 {
+			fmt.Fprintln(terminal.Stderr, "! 无法从 stdin 安全读取 API Key。")
+			return ExitFailure
+		}
+		secret = strings.TrimRight(string(payload), "\r\n")
+		if strings.TrimSpace(secret) == "" {
+			fmt.Fprintln(terminal.Stderr, "! --api-key-stdin 收到空凭据。")
+			return ExitUsage
+		}
+	}
+	if resolvedProvider == config.ProviderOllama && *apiKeyStdin {
+		fmt.Fprintln(terminal.Stderr, "! Ollama setup 不接受 --api-key-stdin。")
+		return ExitUsage
+	}
+	if resolvedProvider == config.ProviderOpenAICompatible && secret == "" {
+		resolver, resolverErr := credentials.NewResolver(*dataDir, os.LookupEnv, credentials.SystemStore{})
+		if resolverErr != nil {
+			writeCommandError(terminal.Stderr, resolverErr)
+			return ExitFailure
+		}
+		resolved, _, credentialErr := resolver.ResolveDetailed(*apiKeyEnv)
+		switch {
+		case credentialErr != nil:
+			if *nonInteractive {
+				writeCommandError(terminal.Stderr, credentialErr)
+				return ExitFailure
+			}
+			fmt.Fprintln(terminal.Stderr, "! 系统凭据库不可用；未读取或保存 API Key。")
+			fmt.Fprintln(terminal.Stderr, "  设置 API Key 环境变量后重试。")
+			return ExitFailure
+		case strings.TrimSpace(resolved) != "":
+		case *nonInteractive:
+			fmt.Fprintf(terminal.Stderr, "! 非交互 setup 缺少 %s 或 --api-key-stdin。\n", *apiKeyEnv)
+			return ExitUsage
+		default:
+			if terminal.ReadPassword == nil {
+				fmt.Fprintln(terminal.Stderr, "! 当前终端不支持隐藏凭据输入。")
+				return ExitFailure
+			}
+			fmt.Fprintf(terminal.Stdout, "API Key（隐藏输入，将保存到系统凭据库）：")
+			payload, passwordErr := terminal.ReadPassword()
+			fmt.Fprintln(terminal.Stdout)
+			if passwordErr != nil || strings.TrimSpace(string(payload)) == "" {
+				fmt.Fprintln(terminal.Stderr, "! 未读取到有效 API Key，setup 已取消且未保存凭据。")
+				return ExitFailure
+			}
+			secret = string(payload)
+		}
+	}
+
+	result, err := setupservice.Run(context.Background(), setupservice.Request{
+		Profile: profile, DataDir: *dataDir, Provider: resolvedProvider,
+		Endpoint: *endpoint, Model: *model, APIKeyEnv: *apiKeyEnv,
+		APIKey: secret, NonInteractive: *nonInteractive, Restart: *restart,
+	}, setupservice.DefaultDependencies(), func(state async.State[setupservice.Progress]) {
+		if state.Phase == async.Streaming && state.Value != nil {
+			fmt.Fprintf(terminal.Stdout, "· [%d/%d] %s\n", state.Value.Current, state.Value.Total, state.Value.Message)
+		}
+	})
+	if err != nil {
+		writeCommandError(terminal.Stderr, err)
+		return ExitFailure
+	}
+	fmt.Fprintf(terminal.Stdout, "✓ setup 完成：%s\n", result.ConfigPath)
+	if profile == setupservice.ProfileFull && !result.RunnerReady {
+		fmt.Fprintln(terminal.Stdout, "! 本地 Runner 镜像尚未就绪；RUNNER_MODE 保持 disabled（远端分发留待 T-027）。")
+	}
+	return ExitOK
 }
 
 func runTraining(args []string, terminal TerminalIO) int {
@@ -639,7 +816,16 @@ func runDoctor(stdout, stderr io.Writer) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	report, runErr := doctor.Run(ctx, runtime, doctor.DefaultOptions())
+	resolver, err := credentials.NewResolver(
+		runtime.DataDir, os.LookupEnv, credentials.SystemStore{},
+	)
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	options := doctor.DefaultOptions()
+	options.Model = doctor.HTTPModelProbe{LookupEnv: resolver.Resolve}
+	report, runErr := doctor.Run(ctx, runtime, options)
 	for _, check := range report.Checks {
 		switch check.Status {
 		case doctor.Ready:
