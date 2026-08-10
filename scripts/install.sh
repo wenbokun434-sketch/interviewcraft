@@ -114,13 +114,21 @@ case "$install_dir" in
 esac
 case "/$install_dir/" in *'/../'*|*'/./'*) die 'install directory must not contain . or .. segments' ;; esac
 binary_path=$install_dir/interviewcraft
+receipt_path=${INTERVIEWCRAFT_INSTALL_TEST_RECEIPT:-$HOME/.interviewcraft/install-receipt.txt}
+if [ "$test_mode" != 1 ]; then receipt_path=$HOME/.interviewcraft/install-receipt.txt; fi
+data_dir=${INTERVIEWCRAFT_DATA_DIR:-$HOME/.interviewcraft}
+case "$data_dir" in /*) ;; *) data_dir=$(pwd)/$data_dir ;; esac
 
 installed_version=
 if [ -f "$binary_path" ]; then
     installed_json=$($binary_path version --json 2>/dev/null) || die 'existing interviewcraft binary is unreadable; move it aside manually'
     installed_version=$(printf '%s' "$installed_json" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
     [ -n "$installed_version" ] || die 'existing interviewcraft binary returned invalid version JSON'
-    [ "$installed_version" = "$version" ] || die "InterviewCraft $installed_version is already installed; automatic upgrades are reserved for T-028"
+    if [ "$installed_version" != "$version" ]; then
+        INTERVIEWCRAFT_INSTALL_RECEIPT=$receipt_path "$binary_path" update --version "$version" || die 'verified update failed; the previous binary and matching data were restored'
+        printf 'InterviewCraft update from %s to %s was accepted by the verified updater.\n' "$installed_version" "$version"
+        exit 0
+    fi
 fi
 
 temp_root=$(mktemp -d "${TMPDIR:-/tmp}/interviewcraft-install.XXXXXX") || die 'could not create a private temporary directory'
@@ -350,13 +358,11 @@ add_path_file "$HOME/.profile" posix
 [ ! -f "$HOME/.config/fish/config.fish" ] || add_path_file "$HOME/.config/fish/config.fish" fish
 case "${SHELL:-}" in */bash) add_path_file "$HOME/.bashrc" posix ;; */zsh) add_path_file "$HOME/.zshrc" posix ;; */fish) add_path_file "$HOME/.config/fish/config.fish" fish ;; esac
 
-receipt_path=${INTERVIEWCRAFT_INSTALL_TEST_RECEIPT:-$HOME/.interviewcraft/install-receipt.txt}
-if [ "$test_mode" != 1 ]; then receipt_path=$HOME/.interviewcraft/install-receipt.txt; fi
 mkdir -p "$(dirname "$receipt_path")"
 receipt_tmp=$(dirname "$receipt_path")/.install-receipt-$$.tmp
 {
     printf '%s\n' "$receipt_header"
-    printf 'version\t%s\ninstall_dir\t%s\nbinary_path\t%s\n' "$version" "$install_dir" "$binary_path"
+    printf 'version\t%s\ninstall_dir\t%s\nbinary_path\t%s\ndata_dir\t%s\n' "$version" "$install_dir" "$binary_path" "$data_dir"
     old_ifs=$IFS; IFS='|'; for path_file in $path_files; do printf 'path_file\t%s\n' "$path_file"; done; IFS=$old_ifs
 } > "$receipt_tmp"
 mv "$receipt_tmp" "$receipt_path"

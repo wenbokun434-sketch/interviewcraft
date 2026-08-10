@@ -18,9 +18,9 @@ Start from either Lite tier and run `interviewcraft setup --profile full --resta
 
 Release artifacts cover Windows, Linux, and macOS on amd64 and arm64. The supported one-command installers are `scripts/install.ps1` for Windows PowerShell 5.1/7 and `scripts/install.sh` for POSIX shells. They install only into user-writable locations, manage marked user PATH entries, run `setup` and `doctor` by default, and never request elevation.
 
-The installer trust sequence is fixed: verify the downloaded Cosign v3.1.3 executable against `scripts/cosign-v3.1.3-sha256.txt`; verify the manifest bundle against the exact tagged release workflow identity and GitHub Actions OIDC issuer; strictly parse the manifest; verify archive SHA-256 and size; reject traversal, links, and unexpected executables; execute the staged binary's `version --json`; then atomically place it. A secret-free receipt at `~/.interviewcraft/install-receipt.txt` records the exact binary and PATH files for uninstall.
+The installer trust sequence is fixed: verify the downloaded Cosign v3.1.3 executable against `scripts/cosign-v3.1.3-sha256.txt`; verify the manifest bundle against the exact tagged release workflow identity and GitHub Actions OIDC issuer; strictly parse the manifest; verify archive SHA-256 and size; reject traversal, links, and unexpected executables; execute the staged binary's `version --json`; then atomically place it. A secret-free receipt at `~/.interviewcraft/install-receipt.txt` records the exact binary, canonical data directory, and PATH files for update, rollback, and uninstall.
 
-Reinstalling the same version is idempotent. A different installed version is not overwritten because verified upgrades and rollback belong to T-028. `scripts/uninstall.ps1` and `scripts/uninstall.sh` remove only receipt-owned binary/PATH entries and preserve configuration, credentials, SQLite data, and the rest of `~/.interviewcraft`.
+Reinstalling the same version is idempotent. A different newer version is delegated to `interviewcraft update`; the installer never overwrites the installed binary directly. `scripts/uninstall.ps1` and `scripts/uninstall.sh` remove only receipt-owned binary/PATH entries and preserve configuration, credentials, SQLite data, reports, and rollback backups by default.
 
 The supported terminal minimum is 80×24. Use `--ascii`, `--no-color`, or `--reduce-motion` for limited terminal capabilities. At smaller dimensions the application deliberately renders an actionable blocked state instead of a clipped workspace.
 
@@ -42,17 +42,21 @@ Environment variables override the local runtime configuration. Do not put crede
 
 The full variable table and examples are in the [README](../README.md#configure-a-model-provider).
 
-## Migration, backup, and restore
+## Verified update, backup, and restore
 
-For an in-place binary upgrade:
+Use the installed receipt-owned binary:
 
-1. Stop all InterviewCraft processes using the data directory.
-2. Copy the complete data directory, including `interviewcraft.db`, to a protected backup location.
-3. Replace the binary, leaving the data directory unchanged.
-4. Run `interviewcraft doctor`. Opening SQLite applies ordered embedded migrations transactionally.
-5. Start with `interviewcraft run` and verify recent sessions and reports.
+```text
+interviewcraft update --check
+interviewcraft update
+interviewcraft rollback
+```
 
-Do not edit `_schema_migrations` or apply SQL manually. If an upgrade fails, preserve the failed directory for diagnosis, restore the complete pre-upgrade directory, and run the previous binary. A database file copied while a writer is active is not a supported backup.
+The updater verifies the exact tagged-workflow Sigstore identity, strict release manifest, archive hash/size, platform, embedded version, available disk, installation receipt, and executable identity before it requests the maintenance lock. The cross-process lock waits for every open Store to close and prevents a second updater or ordinary SQLite process from entering. It then creates a new immutable backup under the data directory's sibling `.<name>-backups` directory. The backup manifest hashes every regular file, preserves empty directories and modes, and includes the currently working binary; symbolic links and special files are rejected.
+
+After an atomic binary switch, the new binary runs embedded migrations and `doctor` while holding a token-bound maintenance guard. Any switch, migration, doctor, Runner verification, receipt commit, cancellation, or interrupted-state failure restores both the prior binary and the complete prior data directory. The failed directory and bounded command diagnostics are retained under the backup root. Windows performs the live executable replacement from a copied helper after the parent exits; Linux and macOS use same-directory atomic rename. Do not copy `interviewcraft.db` independently, edit `_schema_migrations`, or modify a backup in place.
+
+`rollback` verifies the stored backup before modifying the installation and first creates a forward recovery backup of the current version. If the restored version fails migration/doctor, the forward snapshot is restored. No update is a successful empty state and creates neither a backup nor a rollback point.
 
 For migration to another machine or directory, prefer the strict transfer package:
 
@@ -70,6 +74,18 @@ The target must contain no training data. Import is atomic and does not overwrit
 Moving from Lite to Full Practice writes immutable, non-secret Runner metadata and changes `RUNNER_MODE` only after every provisioning gate passes. Do not enable the mode with an environment variable alone. Moving back is immediate: set `RUNNER_MODE=disabled`, rerun `doctor`, and continue the text path. Existing code evidence remains part of completed sessions, but no new code process starts.
 
 Changing model Providers does not rewrite prior evidence. Diagnose the new endpoint before starting a new scenario, and retain the old model setting until the new configuration passes.
+
+## Safe uninstall and purge
+
+`interviewcraft uninstall` and the platform uninstall scripts remove only receipt-owned PATH blocks and the installed binary. Configuration, SQLite data, reports, rollback backups, and system credentials remain available for reinstall.
+
+Data purge is deliberately separate and double-confirmed:
+
+```text
+interviewcraft uninstall --purge-data --confirm-purge "/exact/canonical/.interviewcraft"
+```
+
+The confirmation must equal the canonical data directory stored in the installation receipt. Purge refuses volume roots, the user home, temporary/work directories, symbolic links, and any target overlapping the install directory. The corresponding `InterviewCraft` keyring account is removed before filesystem deletion; an unavailable credential store fails closed instead of falling back to plaintext or broad deletion.
 
 ## Release automation
 

@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
-    [string]$ReceiptPath = ""
+    [string]$ReceiptPath = "",
+    [switch]$PurgeData,
+    [string]$ConfirmPurge = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +37,13 @@ $installDir = [IO.Path]::GetFullPath($values.install_dir)
 $binaryPath = [IO.Path]::GetFullPath($values.binary_path)
 if ([IO.Path]::GetDirectoryName($binaryPath) -ine $installDir -or [IO.Path]::GetFileName($binaryPath) -ine "interviewcraft.exe") {
     throw "install receipt binary path is outside the recorded install directory"
+}
+
+if ($PurgeData) {
+    if (-not $values.ContainsKey("data_dir")) { throw "purge requires a receipt-bound data directory; run a verified update first" }
+    & $binaryPath uninstall --purge-data --confirm-purge $ConfirmPurge
+    if ($LASTEXITCODE -ne 0) { throw "safe purge was rejected; no broad fallback deletion was attempted" }
+    return
 }
 
 $target = $values.path_target

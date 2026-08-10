@@ -8,6 +8,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -30,6 +32,7 @@ import (
 	"github.com/interviewcraft/interviewcraft/internal/tui/app"
 	"github.com/interviewcraft/interviewcraft/internal/tui/screens/training"
 	"github.com/interviewcraft/interviewcraft/internal/tui/theme"
+	updateservice "github.com/interviewcraft/interviewcraft/internal/update"
 	buildversion "github.com/interviewcraft/interviewcraft/internal/version"
 )
 
@@ -56,6 +59,9 @@ var commands = []command{
 	{name: "run", description: "Start the InterviewCraft terminal UI"},
 	{name: "doctor", description: "Check local runtime dependencies"},
 	{name: "version", description: "Print build and platform metadata"},
+	{name: "update", description: "Check for or install a verified release update"},
+	{name: "rollback", description: "Restore the previous binary and complete data backup"},
+	{name: "uninstall", description: "Remove the receipt-owned installation safely"},
 	{name: "export", description: "Export reports or local training data"},
 	{name: "import", description: "Import a local transfer package"},
 }
@@ -103,6 +109,22 @@ func RunWithIO(args []string, terminal TerminalIO) int {
 		writeHelp(stdout)
 		return ExitOK
 	}
+	if strings.HasPrefix(args[0], "__") {
+		terminal.Stdout, terminal.Stderr = stdout, stderr
+		switch args[0] {
+		case "__update-migrate":
+			return runUpdateMigrate(args[1:], stdout, stderr)
+		case "__update-doctor":
+			return runUpdateDoctor(args[1:], stdout, stderr)
+		case "__update-helper":
+			return runUpdateHelper(args[1:], stdout, stderr)
+		case "__uninstall-helper":
+			return runUninstallHelper(args[1:], stdout, stderr)
+		default:
+			fmt.Fprintln(stderr, "! Unknown internal maintenance command.")
+			return ExitUsage
+		}
+	}
 
 	for _, candidate := range commands {
 		if candidate.name != args[0] {
@@ -117,6 +139,8 @@ func RunWithIO(args []string, terminal TerminalIO) int {
 			candidate.name != "run" &&
 			candidate.name != "setup" &&
 			candidate.name != "version" &&
+			candidate.name != "update" &&
+			candidate.name != "uninstall" &&
 			candidate.name != "export" &&
 			candidate.name != "import" {
 			fmt.Fprintf(
@@ -144,6 +168,12 @@ func RunWithIO(args []string, terminal TerminalIO) int {
 			return runDoctor(stdout, stderr)
 		case "version":
 			return runVersion(args[1:], stdout, stderr)
+		case "update":
+			return runUpdate(args[1:], stdout, stderr)
+		case "rollback":
+			return runRollback(stdout, stderr)
+		case "uninstall":
+			return runUninstall(args[1:], stdout, stderr)
 		case "export":
 			return runExport(args[1:], stdout, stderr)
 		case "import":
@@ -214,6 +244,18 @@ func writeCommandHelp(output io.Writer, target command) {
 		fmt.Fprintln(output)
 		fmt.Fprintln(output, "API key values are never accepted as command-line arguments.")
 	}
+	if target.name == "update" {
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "Options:")
+		fmt.Fprintln(output, "  --check             Check without downloading or modifying the installation")
+		fmt.Fprintln(output, "  --version <version> Install an explicit newer release")
+	}
+	if target.name == "uninstall" {
+		fmt.Fprintln(output)
+		fmt.Fprintln(output, "Options:")
+		fmt.Fprintln(output, "  --purge-data                 Also remove the receipt-bound data and credential")
+		fmt.Fprintln(output, "  --confirm-purge <exact-path> Required second confirmation for --purge-data")
+	}
 	if target.name == "export" {
 		fmt.Fprintln(output)
 		fmt.Fprintln(output, "Options:")
@@ -234,6 +276,316 @@ func writeCommandHelp(output io.Writer, target command) {
 		return
 	}
 	fmt.Fprintf(output, "Status: planned for TODO %s.\n", target.task)
+}
+
+func runUpdate(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("update", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	checkOnly := flags.Bool("check", false, "check for updates")
+	versionValue := flags.String("version", "", "explicit release version")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "! Unable to parse update options.")
+		fmt.Fprintln(stderr, "  Run `interviewcraft update --help` for usage.")
+		return ExitUsage
+	}
+	runtimeConfig, _, err := config.LoadOS()
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	updateOptions := updateservice.Options{
+		Current:        buildversion.Current(),
+		DataDir:        runtimeConfig.DataDir,
+		ReceiptPath:    installReceiptPath(),
+		ExecutablePath: executablePath(),
+	}
+	if err := applyUpdateFixture(&updateOptions); err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	result, err := updateservice.Run(ctx, updateservice.Request{
+		CheckOnly: *checkOnly,
+		Version:   strings.TrimSpace(*versionValue),
+	}, updateOptions, updateProgress(stdout))
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	if *checkOnly {
+		if result.AvailableVersion == "" || result.AvailableVersion == result.CurrentVersion {
+			fmt.Fprintf(stdout, "InterviewCraft %s is up to date.\n", result.CurrentVersion)
+		} else {
+			fmt.Fprintf(stdout, "InterviewCraft %s is available (current %s).\n", result.AvailableVersion, result.CurrentVersion)
+		}
+		return ExitOK
+	}
+	if result.Scheduled {
+		fmt.Fprintf(stdout, "Verified update %s is prepared; the Windows replacement helper will finish after this process exits.\n", result.AvailableVersion)
+		return ExitOK
+	}
+	if !result.Updated {
+		fmt.Fprintf(stdout, "InterviewCraft %s is already current; no backup was created.\n", result.CurrentVersion)
+		return ExitOK
+	}
+	fmt.Fprintf(stdout, "InterviewCraft was updated to %s. Rollback point: %s\n", result.CurrentVersion, result.BackupDirectory)
+	return ExitOK
+}
+
+func runRollback(stdout, stderr io.Writer) int {
+	runtimeConfig, _, err := config.LoadOS()
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	result, err := updateservice.Rollback(ctx, updateservice.Options{
+		Current:        buildversion.Current(),
+		DataDir:        runtimeConfig.DataDir,
+		ReceiptPath:    installReceiptPath(),
+		ExecutablePath: executablePath(),
+	}, updateProgress(stdout))
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	if !result.RolledBack {
+		fmt.Fprintln(stdout, "No committed rollback point is available; the current installation was not changed.")
+		return ExitOK
+	}
+	fmt.Fprintf(stdout, "InterviewCraft was rolled back to %s with its matching complete data directory.\n", result.CurrentVersion)
+	return ExitOK
+}
+
+func runUninstall(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("uninstall", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	purge := flags.Bool("purge-data", false, "remove receipt-bound data and credential")
+	confirmation := flags.String("confirm-purge", "", "exact canonical purge path")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "! Unable to parse uninstall options.")
+		fmt.Fprintln(stderr, "  Run `interviewcraft uninstall --help` for usage.")
+		return ExitUsage
+	}
+	if !*purge && strings.TrimSpace(*confirmation) != "" {
+		fmt.Fprintln(stderr, "! --confirm-purge is only valid with --purge-data.")
+		return ExitUsage
+	}
+	dataDir := ""
+	if *purge {
+		runtimeConfig, _, err := config.LoadOS()
+		if err != nil {
+			writeCommandError(stderr, err)
+			return ExitFailure
+		}
+		dataDir = runtimeConfig.DataDir
+	}
+	result, err := updateservice.Uninstall(context.Background(), updateservice.UninstallOptions{
+		ReceiptPath:    installReceiptPath(),
+		ExecutablePath: executablePath(),
+		DataDir:        dataDir,
+		PurgeData:      *purge,
+		Confirmation:   strings.TrimSpace(*confirmation),
+	})
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	if result.Scheduled {
+		fmt.Fprintf(stdout, "InterviewCraft %s uninstall is scheduled and will finish after this process exits.\n", result.Version)
+		return ExitOK
+	}
+	writeUninstallResult(stdout, result)
+	return ExitOK
+}
+
+func runUpdateMigrate(args []string, stdout, stderr io.Writer) int {
+	dataDir, token, ok := parseMaintenanceFlags("__update-migrate", args, stderr)
+	if !ok {
+		return ExitUsage
+	}
+	if token != strings.TrimSpace(os.Getenv(db.MaintenanceTokenEnv)) {
+		fmt.Fprintln(stderr, "! Update maintenance authorization is invalid.")
+		return ExitFailure
+	}
+	runtimeConfig, _, err := config.LoadAt(dataDir)
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	store, err := db.Open(context.Background(), db.Config{DataDir: dataDir, DatabaseName: runtimeConfig.DatabaseName}, nil)
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	if err := store.Close(); err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	fmt.Fprintln(stdout, "SQLite migrations completed under the exclusive update guard.")
+	return ExitOK
+}
+
+func runUpdateDoctor(args []string, stdout, stderr io.Writer) int {
+	dataDir, token, ok := parseMaintenanceFlags("__update-doctor", args, stderr)
+	if !ok {
+		return ExitUsage
+	}
+	if token != strings.TrimSpace(os.Getenv(db.MaintenanceTokenEnv)) {
+		fmt.Fprintln(stderr, "! Update maintenance authorization is invalid.")
+		return ExitFailure
+	}
+	active, _, err := config.LoadOS()
+	if err != nil || filepath.Clean(active.DataDir) != filepath.Clean(dataDir) {
+		fmt.Fprintln(stderr, "! Update doctor data directory does not match the guarded workspace.")
+		return ExitFailure
+	}
+	return runDoctor(stdout, stderr)
+}
+
+func runUpdateHelper(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("__update-helper", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	statePath := flags.String("state", "", "prepared update state")
+	parentValue := flags.String("parent", "", "parent PID")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *statePath == "" {
+		fmt.Fprintln(stderr, "! Invalid update helper request.")
+		return ExitUsage
+	}
+	parent, err := strconv.Atoi(*parentValue)
+	if err != nil || parent <= 0 {
+		fmt.Fprintln(stderr, "! Invalid update helper parent process.")
+		return ExitUsage
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := updateservice.WaitForParent(ctx, parent); err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	if _, err := updateservice.Finalize(ctx, *statePath, updateservice.Options{}, updateProgress(stdout)); err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	return ExitOK
+}
+
+func runUninstallHelper(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("__uninstall-helper", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	parentValue := flags.String("parent", "", "parent PID")
+	receiptPath := flags.String("receipt", "", "install receipt")
+	dataDir := flags.String("data-dir", "", "receipt-bound data directory")
+	purge := flags.Bool("purge-data", false, "purge data")
+	confirmation := flags.String("confirm-purge", "", "exact purge confirmation")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *receiptPath == "" {
+		fmt.Fprintln(stderr, "! Invalid uninstall helper request.")
+		return ExitUsage
+	}
+	parent, err := strconv.Atoi(*parentValue)
+	if err != nil || parent <= 0 {
+		fmt.Fprintln(stderr, "! Invalid uninstall helper parent process.")
+		return ExitUsage
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := updateservice.WaitForParent(ctx, parent); err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	result, err := updateservice.FinalizeUninstall(ctx, updateservice.UninstallOptions{
+		ReceiptPath: *receiptPath, DataDir: *dataDir, PurgeData: *purge, Confirmation: *confirmation,
+	})
+	helperPath := executablePath()
+	updateservice.CleanupUninstallHelper(helperPath)
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	writeUninstallResult(stdout, result)
+	return ExitOK
+}
+
+func parseMaintenanceFlags(name string, args []string, stderr io.Writer) (string, string, bool) {
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	dataDir := flags.String("data-dir", "", "guarded data directory")
+	token := flags.String("token", "", "maintenance token")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || strings.TrimSpace(*dataDir) == "" || strings.TrimSpace(*token) == "" {
+		fmt.Fprintln(stderr, "! Invalid update maintenance request.")
+		return "", "", false
+	}
+	absolute, err := filepath.Abs(*dataDir)
+	if err != nil {
+		fmt.Fprintln(stderr, "! Invalid update maintenance data directory.")
+		return "", "", false
+	}
+	return absolute, strings.TrimSpace(*token), true
+}
+
+func updateProgress(output io.Writer) updateservice.Observer {
+	return func(state async.State[updateservice.Progress]) {
+		if state.Phase == async.Streaming && state.Value != nil {
+			fmt.Fprintf(output, "· [%d/%d] %s: %s\n", state.Value.Current, state.Value.Total, state.Value.Stage, state.Value.Message)
+		}
+	}
+}
+
+func installReceiptPath() string {
+	if value := strings.TrimSpace(os.Getenv("INTERVIEWCRAFT_INSTALL_RECEIPT")); value != "" {
+		return value
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".interviewcraft", "install-receipt.txt")
+}
+
+func applyUpdateFixture(options *updateservice.Options) error {
+	if strings.TrimSpace(os.Getenv("INTERVIEWCRAFT_UPDATE_TEST_MODE")) != "1" {
+		return nil
+	}
+	latest := strings.TrimSpace(os.Getenv("INTERVIEWCRAFT_UPDATE_TEST_LATEST_URL"))
+	base := strings.TrimSpace(os.Getenv("INTERVIEWCRAFT_UPDATE_TEST_RELEASE_BASE_URL"))
+	verifier := strings.TrimSpace(os.Getenv("INTERVIEWCRAFT_UPDATE_TEST_COSIGN_PATH"))
+	hash := strings.TrimSpace(os.Getenv("INTERVIEWCRAFT_UPDATE_TEST_COSIGN_SHA256"))
+	for _, raw := range []string{latest, base} {
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.Scheme != "http" || parsed.Hostname() == "" {
+			return errors.New("update fixture URLs must use loopback HTTP")
+		}
+		host := parsed.Hostname()
+		address := net.ParseIP(host)
+		if host != "localhost" && (address == nil || !address.IsLoopback()) {
+			return errors.New("update fixture URLs must use loopback HTTP")
+		}
+	}
+	if verifier == "" || hash == "" {
+		return errors.New("update fixture requires an explicitly hashed local Cosign verifier")
+	}
+	options.LatestURL = latest
+	options.ReleaseBaseURL = base
+	options.LocalVerifierPath = verifier
+	options.LocalVerifierSHA256 = hash
+	return nil
+}
+
+func executablePath() string {
+	path, _ := os.Executable()
+	path, _ = filepath.Abs(path)
+	return path
+}
+
+func writeUninstallResult(output io.Writer, result updateservice.UninstallResult) {
+	fmt.Fprintf(output, "InterviewCraft %s was uninstalled.\n", result.Version)
+	if result.Purged {
+		fmt.Fprintln(output, "The receipt-bound data directory, rollback backups, and system credential were purged.")
+	} else {
+		fmt.Fprintln(output, "Configuration, credentials, SQLite data, reports, and rollback backups were preserved.")
+	}
 }
 
 func runExport(args []string, stdout, stderr io.Writer) int {

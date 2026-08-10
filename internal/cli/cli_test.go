@@ -37,7 +37,7 @@ func TestRunHelpListsOrderedCommandPlaceholders(t *testing.T) {
 
 	output := stdout.String()
 	lastIndex := -1
-	for _, name := range []string{"init", "setup", "run", "doctor", "version", "export", "import"} {
+	for _, name := range []string{"init", "setup", "run", "doctor", "version", "update", "rollback", "uninstall", "export", "import"} {
 		index := strings.Index(output, name)
 		if index == -1 {
 			t.Errorf("help output does not contain %q", name)
@@ -47,6 +47,50 @@ func TestRunHelpListsOrderedCommandPlaceholders(t *testing.T) {
 			t.Errorf("help command %q is out of order", name)
 		}
 		lastIndex = index
+	}
+}
+
+func TestUpdateRollbackAndUninstallHelp(t *testing.T) {
+	for _, test := range []struct {
+		command string
+		want    []string
+	}{
+		{command: "update", want: []string{"--check", "--version"}},
+		{command: "rollback", want: []string{"Status: available"}},
+		{command: "uninstall", want: []string{"--purge-data", "--confirm-purge"}},
+	} {
+		t.Run(test.command, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := Run([]string{test.command, "--help"}, &stdout, &stderr); code != ExitOK || stderr.Len() != 0 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			for _, fragment := range test.want {
+				if !strings.Contains(stdout.String(), fragment) {
+					t.Fatalf("help missing %q: %q", fragment, stdout.String())
+				}
+			}
+		})
+	}
+}
+
+func TestUpdateSourceBuildFailsWithoutNetworkOrBackup(t *testing.T) {
+	dataDir := filepath.Join(t.TempDir(), ".interviewcraft")
+	t.Setenv("INTERVIEWCRAFT_DATA_DIR", dataDir)
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"update", "--check"}, &stdout, &stderr)
+	if code != ExitFailure || !strings.Contains(stderr.String(), "更新") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dataDir), ".interviewcraft-backups")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("source check created update workspace: %v", err)
+	}
+}
+
+func TestHiddenMaintenanceRejectsMissingAuthorization(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"__update-migrate", "--data-dir", filepath.Join(t.TempDir(), "data"), "--token", "not-authorized"}, &stdout, &stderr)
+	if code != ExitFailure || !strings.Contains(stderr.String(), "authorization") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
 

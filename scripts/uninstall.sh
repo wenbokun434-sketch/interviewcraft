@@ -1,7 +1,18 @@
 #!/bin/sh
 set -eu
 
-receipt_path=${1:-${INTERVIEWCRAFT_INSTALL_TEST_RECEIPT:-$HOME/.interviewcraft/install-receipt.txt}}
+receipt_path=${INTERVIEWCRAFT_INSTALL_TEST_RECEIPT:-$HOME/.interviewcraft/install-receipt.txt}
+purge_data=0
+confirm_purge=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --receipt) [ "$#" -ge 2 ] || exit 2; receipt_path=$2; shift 2 ;;
+        --purge-data) purge_data=1; shift ;;
+        --confirm-purge) [ "$#" -ge 2 ] || exit 2; confirm_purge=$2; shift 2 ;;
+        -h|--help) printf '%s\n' 'usage: uninstall.sh [--receipt PATH] [--purge-data --confirm-purge EXACT_DATA_DIR]'; exit 0 ;;
+        *) printf '%s\n' 'uninstall: invalid option' >&2; exit 2 ;;
+    esac
+done
 header=interviewcraft-install-receipt-v1
 path_begin='# >>> InterviewCraft PATH >>>'
 path_end='# <<< InterviewCraft PATH <<<'
@@ -14,6 +25,7 @@ version=
 install_dir=
 binary_path=
 path_files=
+data_dir=
 while IFS=$tab read -r key value extra; do
     [ -z "${extra:-}" ] || { printf '%s\n' 'uninstall: malformed receipt' >&2; exit 1; }
     case "$key" in
@@ -21,12 +33,19 @@ while IFS=$tab read -r key value extra; do
         version) [ -z "$version" ] || exit 1; version=$value ;;
         install_dir) [ -z "$install_dir" ] || exit 1; install_dir=$value ;;
         binary_path) [ -z "$binary_path" ] || exit 1; binary_path=$value ;;
+        data_dir) [ -z "$data_dir" ] || exit 1; data_dir=$value ;;
         path_file) path_files=${path_files}${path_files:+|}$value ;;
         *) printf 'uninstall: unknown receipt field: %s\n' "$key" >&2; exit 1 ;;
     esac
 done < "$receipt_path"
 if ! { [ -n "$version" ] && [ -n "$install_dir" ] && [ -n "$binary_path" ]; }; then printf '%s\n' 'uninstall: incomplete receipt' >&2; exit 1; fi
 if ! { [ "$(dirname "$binary_path")" = "$install_dir" ] && [ "$(basename "$binary_path")" = interviewcraft ]; }; then printf '%s\n' 'uninstall: unsafe binary path in receipt' >&2; exit 1; fi
+
+if [ "$purge_data" -eq 1 ]; then
+    [ -n "$data_dir" ] || { printf '%s\n' 'uninstall: purge requires a receipt-bound data directory; run a verified update first' >&2; exit 1; }
+    "$binary_path" uninstall --purge-data --confirm-purge "$confirm_purge" || { printf '%s\n' 'uninstall: safe purge was rejected; no broad fallback deletion was attempted' >&2; exit 1; }
+    exit 0
+fi
 
 strip_block() {
     target=$1

@@ -92,7 +92,18 @@ $installer = Join-Path $env:TEMP "interviewcraft-install.ps1"; Invoke-WebRequest
 curl -fsSL https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/main/scripts/install.sh -o /tmp/interviewcraft-install.sh && sh /tmp/interviewcraft-install.sh --version 1.2.3 --profile private-local --provider ollama --endpoint http://127.0.0.1:11434 --model llama3.2 --non-interactive && rm -f /tmp/interviewcraft-install.sh
 ```
 
-API Key 只可通过 `-ApiKeyStdin`/`--api-key-stdin` 传入。安装器先用仓库固定 SHA-256 验证 Cosign v3.1.3，再验证发布清单的 Sigstore bundle、精确 GitHub Actions 发布者身份和 OIDC issuer，随后验证归档 hash/size、路径和内嵌版本，最后原子安装。同版本重复执行是幂等的；检测到其他版本会拒绝覆盖，升级留给 T-028。
+API Key 只可通过 `-ApiKeyStdin`/`--api-key-stdin` 传入。安装器先用仓库固定 SHA-256 验证 Cosign v3.1.3，再验证发布清单的 Sigstore bundle、精确 GitHub Actions 发布者身份和 OIDC issuer，随后验证归档 hash/size、路径和内嵌版本，最后原子安装。同版本重复执行是幂等的；对已安装版本传入更新版本时，安装器转交内置可信更新器，不会直接覆盖现有二进制。
+
+检查、升级和回滚：
+
+```text
+interviewcraft update --check
+interviewcraft update
+interviewcraft update --version 1.3.0
+interviewcraft rollback
+```
+
+更新器严格执行 `check → download → verify → backup → switch → migrate → doctor → commit`。它先等待所有 SQLite 写进程退出并获取跨进程独占维护锁，再创建含二进制与完整数据目录的逐文件 SHA-256 备份。签名、checksum、磁盘、备份或锁检查在切换前失败时不改现状；切换后的迁移、doctor、Runner 复验、取消或断点失败会自动恢复旧二进制和匹配的数据目录。Windows 使用退出后的自替换 helper，Linux/macOS 使用同目录原子 rename。`update --check` 在没有新版本时成功退出，且不创建空备份。
 
 卸载只依据无密钥安装收据删除自身二进制和 PATH 条目，默认保留配置、系统凭据和 `~/.interviewcraft`：
 
@@ -102,6 +113,12 @@ $uninstaller = Join-Path $env:TEMP "interviewcraft-uninstall.ps1"; Invoke-WebReq
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/main/scripts/uninstall.sh -o /tmp/interviewcraft-uninstall.sh && sh /tmp/interviewcraft-uninstall.sh
+```
+
+也可以运行 `interviewcraft uninstall`。只有明确传入 `--purge-data`，并用 `--confirm-purge` 再次给出安装收据绑定的规范数据目录时，才会同时删除该目录、回滚备份和对应系统凭据；主目录、临时目录、工作目录、卷根目录、符号链接或与安装目录重叠的目标一律拒绝。例如先用 `interviewcraft doctor` 确认数据目录，再执行：
+
+```text
+interviewcraft uninstall --purge-data --confirm-purge "/exact/canonical/.interviewcraft"
 ```
 
 ### 方式二：手动下载发行包

@@ -46,6 +46,7 @@ type MigrationObserver func(async.State[MigrationProgress])
 type Store struct {
 	sql   *sql.DB
 	paths Paths
+	lock  *workspaceLock
 }
 
 // Open creates the local layout, opens SQLite, and applies pending migrations.
@@ -66,9 +67,15 @@ func openWithMigrations(
 		notify(observer, async.NewFailed[MigrationProgress](typedErr))
 		return nil, typedErr
 	}
+	lock, typedErr := acquireWorkspaceLock(ctx, paths.DataDir)
+	if typedErr != nil {
+		notify(observer, async.NewFailed[MigrationProgress](typedErr))
+		return nil, typedErr
+	}
 
 	database, err := sql.Open("sqlite", paths.Database)
 	if err != nil {
+		_ = lock.Close()
 		typedErr = storageError(
 			"open SQLite",
 			paths.Database,
@@ -81,14 +88,16 @@ func openWithMigrations(
 	database.SetMaxOpenConns(1)
 	database.SetMaxIdleConns(1)
 
-	store := &Store{sql: database, paths: paths}
+	store := &Store{sql: database, paths: paths, lock: lock}
 	if typedErr = store.configure(ctx); typedErr != nil {
 		_ = database.Close()
+		_ = lock.Close()
 		notify(observer, async.NewFailed[MigrationProgress](typedErr))
 		return nil, typedErr
 	}
 	if typedErr = store.applyMigrations(ctx, migrations, observer); typedErr != nil {
 		_ = database.Close()
+		_ = lock.Close()
 		notify(observer, async.NewFailed[MigrationProgress](typedErr))
 		return nil, typedErr
 	}
@@ -115,7 +124,12 @@ func (s *Store) Close() error {
 	if s == nil || s.sql == nil {
 		return nil
 	}
-	return s.sql.Close()
+	databaseErr := s.sql.Close()
+	lockErr := s.lock.Close()
+	if databaseErr != nil {
+		return databaseErr
+	}
+	return lockErr
 }
 
 // SchemaVersion returns the latest applied migration version.

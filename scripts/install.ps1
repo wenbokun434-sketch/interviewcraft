@@ -288,14 +288,14 @@ function Remove-ManagedPath {
 }
 
 function Write-Receipt {
-    param([string]$Path, [string]$ReleaseVersion, [string]$Directory, [string]$Binary, [string]$PathTarget)
-    foreach ($value in @($ReleaseVersion, $Directory, $Binary, $PathTarget)) {
+    param([string]$Path, [string]$ReleaseVersion, [string]$Directory, [string]$Binary, [string]$DataDir, [string]$PathTarget)
+    foreach ($value in @($ReleaseVersion, $Directory, $Binary, $DataDir, $PathTarget)) {
         if ($value.Contains("`t") -or $value.Contains("`r") -or $value.Contains("`n")) { throw "receipt value contains an invalid control character" }
     }
     $parent = Split-Path -Parent $Path
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     $temporary = Join-Path $parent (".install-receipt-" + [guid]::NewGuid().ToString("N") + ".tmp")
-    $lines = @($receiptHeader, "version`t$ReleaseVersion", "install_dir`t$Directory", "binary_path`t$Binary", "path_target`t$PathTarget")
+    $lines = @($receiptHeader, "version`t$ReleaseVersion", "install_dir`t$Directory", "binary_path`t$Binary", "data_dir`t$DataDir", "path_target`t$PathTarget")
     [IO.File]::WriteAllLines($temporary, $lines, (New-Object Text.UTF8Encoding($false)))
     Move-Item -LiteralPath $temporary -Destination $Path -Force
 }
@@ -310,7 +310,18 @@ $tag = "v$releaseVersion"
 $binaryPath = Join-Path $resolvedInstallDir "interviewcraft.exe"
 $existingVersion = Get-InstalledVersion -Binary $binaryPath
 if ($existingVersion -ne "" -and $existingVersion -ne $releaseVersion) {
-    throw "InterviewCraft $existingVersion is already installed. Automatic upgrades are reserved for T-028; uninstall or wait for update."
+    $receiptPath = Get-ReceiptPath
+    $previousReceipt = $env:INTERVIEWCRAFT_INSTALL_RECEIPT
+    try {
+        $env:INTERVIEWCRAFT_INSTALL_RECEIPT = $receiptPath
+        & $binaryPath update --version $releaseVersion
+        if ($LASTEXITCODE -ne 0) { throw "verified update failed; the previous binary and matching data were restored" }
+    }
+    finally {
+        $env:INTERVIEWCRAFT_INSTALL_RECEIPT = $previousReceipt
+    }
+    Write-Host "InterviewCraft update from $existingVersion to $releaseVersion was accepted by the verified updater."
+    return
 }
 
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("interviewcraft-install-" + [guid]::NewGuid().ToString("N"))
@@ -399,7 +410,8 @@ try {
     Write-Stage 7 7 "managing user PATH and writing receipt"
     $pathTarget = Add-ManagedPath -Directory $resolvedInstallDir
     $receiptPath = Get-ReceiptPath
-    Write-Receipt -Path $receiptPath -ReleaseVersion $releaseVersion -Directory $resolvedInstallDir -Binary $binaryPath -PathTarget $pathTarget
+    $receiptDataDir = if ([string]::IsNullOrWhiteSpace($env:INTERVIEWCRAFT_DATA_DIR)) { Join-Path $HOME ".interviewcraft" } else { [IO.Path]::GetFullPath($env:INTERVIEWCRAFT_DATA_DIR) }
+    Write-Receipt -Path $receiptPath -ReleaseVersion $releaseVersion -Directory $resolvedInstallDir -Binary $binaryPath -DataDir $receiptDataDir -PathTarget $pathTarget
     Write-Host "InterviewCraft $releaseVersion installed at $binaryPath"
     Write-Host "Open a new terminal and run: interviewcraft version"
 }
