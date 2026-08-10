@@ -10,10 +10,16 @@ import (
 )
 
 const (
-	requestVersion  = "interviewcraft-runner-request-v1"
-	responseVersion = "interviewcraft-runner-response-v1"
-	defaultImage    = "interviewcraft-runner:local"
+	requestVersion         = "interviewcraft-runner-request-v1"
+	responseVersion        = "interviewcraft-runner-response-v1"
+	defaultImage           = "interviewcraft-runner:local"
+	OfficialRepository     = "ghcr.io/wenbokun434-sketch/interviewcraft-runner"
+	OIDCIssuer             = "https://token.actions.githubusercontent.com"
+	CertificateIdentityURL = "https://github.com/wenbokun434-sketch/interviewcraft/.github/workflows/release.yml@refs/tags/v"
 )
+
+// ResponseProtocol is the compatibility label required on released images.
+const ResponseProtocol = responseVersion
 
 // Limits is the mandatory per-container security profile.
 type Limits struct {
@@ -43,9 +49,16 @@ func DefaultLimits() Limits {
 
 // Config selects the local image and Docker CLI path.
 type Config struct {
-	DockerBinary string
-	Image        string
-	Limits       Limits
+	DockerBinary         string
+	CosignBinary         string
+	Image                string
+	ExpectedDigest       string
+	ExpectedVersion      string
+	ExpectedProtocol     string
+	ExpectedArchitecture string
+	CertificateIdentity  string
+	OIDCIssuer           string
+	Limits               Limits
 }
 
 // DefaultConfig is safe but inert until passed to New and wired by an
@@ -71,6 +84,11 @@ type CommandExecutor interface {
 	Run(context.Context, []byte, ...string) (CommandResult, error)
 }
 
+// SignatureVerifier verifies a registry image without exposing command output.
+type SignatureVerifier interface {
+	VerifyImage(context.Context, string, string, string) error
+}
+
 // Progress reports elapsed isolated execution time while editor state remains
 // owned by the caller.
 type Progress struct {
@@ -83,24 +101,30 @@ type Observer func(async.State[Progress])
 
 // Options injects deterministic command and naming boundaries for tests.
 type Options struct {
-	Command          CommandExecutor
-	NewContainerName func() string
-	Observer         Observer
-	Now              func() time.Time
+	Command           CommandExecutor
+	NewContainerName  func() string
+	Observer          Observer
+	Now               func() time.Time
+	SignatureVerifier SignatureVerifier
 }
 
 // Diagnostic is a non-sensitive health and policy summary.
 type Diagnostic struct {
-	DockerVersion   string
-	Image           string
-	ImageReady      bool
-	NetworkDisabled bool
-	ReadOnlyRoot    bool
-	NonRootUser     bool
-	CapabilitiesOff bool
-	NoNewPrivileges bool
-	CPUs            float64
-	MemoryMB        int
-	PIDs            int
-	WallTime        time.Duration
+	DockerVersion     string
+	Image             string
+	Digest            string
+	Version           string
+	Protocol          string
+	Architecture      string
+	ImageReady        bool
+	SignatureVerified bool
+	NetworkDisabled   bool
+	ReadOnlyRoot      bool
+	NonRootUser       bool
+	CapabilitiesOff   bool
+	NoNewPrivileges   bool
+	CPUs              float64
+	MemoryMB          int
+	PIDs              int
+	WallTime          time.Duration
 }

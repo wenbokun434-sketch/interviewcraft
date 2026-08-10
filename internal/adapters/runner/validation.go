@@ -13,9 +13,11 @@ import (
 )
 
 var (
-	imagePattern         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$`)
-	containerNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
-	versionPattern       = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]{0,63}$`)
+	imagePattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,255}$`)
+	containerNamePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+	versionPattern        = regexp.MustCompile(`^[0-9][0-9A-Za-z.+-]{0,63}$`)
+	digestPattern         = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	releaseVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
 )
 
 func normalizeConfig(config Config) Config {
@@ -25,6 +27,9 @@ func normalizeConfig(config Config) Config {
 	}
 	if strings.TrimSpace(config.Image) == "" {
 		config.Image = defaults.Image
+	}
+	if strings.TrimSpace(config.CosignBinary) == "" {
+		config.CosignBinary = "cosign"
 	}
 	if config.Limits.CPUs == 0 {
 		config.Limits.CPUs = defaults.Limits.CPUs
@@ -58,8 +63,30 @@ func validateConfig(config Config) error {
 	if strings.ContainsRune(config.DockerBinary, 0) {
 		issues = append(issues, "docker binary contains NUL")
 	}
+	if strings.ContainsRune(config.CosignBinary, 0) {
+		issues = append(issues, "cosign binary contains NUL")
+	}
 	if !imagePattern.MatchString(config.Image) || strings.HasPrefix(config.Image, "-") {
 		issues = append(issues, "image reference is invalid")
+	}
+	strict := config.ExpectedDigest != "" || strings.HasPrefix(config.Image, OfficialRepository+"@")
+	if strict {
+		if !digestPattern.MatchString(config.ExpectedDigest) ||
+			config.Image != OfficialRepository+"@"+config.ExpectedDigest {
+			issues = append(issues, "released image must use the official immutable digest")
+		}
+		if !releaseVersionPattern.MatchString(config.ExpectedVersion) {
+			issues = append(issues, "expected runner version is invalid")
+		}
+		if config.ExpectedProtocol != ResponseProtocol {
+			issues = append(issues, "expected runner protocol is incompatible")
+		}
+		if config.ExpectedArchitecture != "amd64" && config.ExpectedArchitecture != "arm64" {
+			issues = append(issues, "expected runner architecture is invalid")
+		}
+		if strings.TrimSpace(config.CertificateIdentity) == "" || config.OIDCIssuer != OIDCIssuer {
+			issues = append(issues, "runner signature policy is invalid")
+		}
 	}
 	limits := config.Limits
 	if limits.CPUs < 0.10 || limits.CPUs > 2 {

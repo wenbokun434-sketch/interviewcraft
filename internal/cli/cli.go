@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	term "github.com/charmbracelet/x/term"
+	runneradapter "github.com/interviewcraft/interviewcraft/internal/adapters/runner"
 	"github.com/interviewcraft/interviewcraft/internal/config"
 	"github.com/interviewcraft/interviewcraft/internal/core/async"
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
@@ -544,7 +546,9 @@ func runSetup(args []string, terminal TerminalIO) int {
 		}
 	}
 
-	result, err := setupservice.Run(context.Background(), setupservice.Request{
+	setupContext, stopSetup := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stopSetup()
+	result, err := setupservice.Run(setupContext, setupservice.Request{
 		Profile: profile, DataDir: *dataDir, Provider: resolvedProvider,
 		Endpoint: *endpoint, Model: *model, APIKeyEnv: *apiKeyEnv,
 		APIKey: secret, NonInteractive: *nonInteractive, Restart: *restart,
@@ -558,8 +562,8 @@ func runSetup(args []string, terminal TerminalIO) int {
 		return ExitFailure
 	}
 	fmt.Fprintf(terminal.Stdout, "✓ setup 完成：%s\n", result.ConfigPath)
-	if profile == setupservice.ProfileFull && !result.RunnerReady {
-		fmt.Fprintln(terminal.Stdout, "! 本地 Runner 镜像尚未就绪；RUNNER_MODE 保持 disabled（远端分发留待 T-027）。")
+	if profile == setupservice.ProfileFull && result.RunnerReady {
+		fmt.Fprintln(terminal.Stdout, "✓ Full Practice Runner 已按签名与 digest 验证并启用。")
 	}
 	return ExitOK
 }
@@ -858,6 +862,14 @@ func runDoctor(stdout, stderr io.Writer) int {
 	}
 	options := doctor.DefaultOptions()
 	options.Model = doctor.HTTPModelProbe{LookupEnv: resolver.Resolve}
+	if runtime.RunnerMode == config.RunnerDocker {
+		probe, probeErr := runneradapter.New(runneradapter.ConfigForRuntime(runtime), runneradapter.Options{})
+		if probeErr != nil {
+			writeCommandError(stderr, probeErr)
+			return ExitFailure
+		}
+		options.Runner = probe
+	}
 	report, runErr := doctor.Run(ctx, runtime, options)
 	for _, check := range report.Checks {
 		switch check.Status {

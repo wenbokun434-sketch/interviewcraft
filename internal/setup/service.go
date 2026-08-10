@@ -8,18 +8,19 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
 
+	runneradapter "github.com/interviewcraft/interviewcraft/internal/adapters/runner"
 	"github.com/interviewcraft/interviewcraft/internal/config"
 	"github.com/interviewcraft/interviewcraft/internal/core/async"
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
 	"github.com/interviewcraft/interviewcraft/internal/credentials"
 	"github.com/interviewcraft/interviewcraft/internal/db"
 	"github.com/interviewcraft/interviewcraft/internal/doctor"
+	"github.com/interviewcraft/interviewcraft/internal/version"
 )
 
 const StateFileName = "setup-state.json"
@@ -42,13 +43,14 @@ const (
 	StageProvider   Stage = "provider"
 	StageCredential Stage = "credential"
 	StageInitialize Stage = "initialize"
+	StageRunner     Stage = "runner"
 	StageDiagnose   Stage = "diagnose"
 	StageComplete   Stage = "complete"
 )
 
 var stages = []Stage{
 	StagePreflight, StageProfile, StageProvider, StageCredential,
-	StageInitialize, StageDiagnose, StageComplete,
+	StageInitialize, StageRunner, StageDiagnose, StageComplete,
 }
 
 // Progress is safe to print and never contains credential values.
@@ -96,13 +98,13 @@ type databaseCloser interface{ Close() error }
 
 // Dependencies injects fault and platform boundaries for deterministic tests.
 type Dependencies struct {
-	Credentials  credentials.Store
-	LookupEnv    func(string) (string, bool)
-	OpenDatabase func(context.Context, db.Config) (databaseCloser, error)
-	Diagnose     func(context.Context, config.Runtime, func(string) (string, bool)) (doctor.Report, error)
-	RunnerReady  func(context.Context) bool
-	SaveConfig   func(string, config.Runtime) error
-	Now          func() time.Time
+	Credentials     credentials.Store
+	LookupEnv       func(string) (string, bool)
+	OpenDatabase    func(context.Context, db.Config) (databaseCloser, error)
+	Diagnose        func(context.Context, config.Runtime, func(string) (string, bool)) (doctor.Report, error)
+	ProvisionRunner func(context.Context, runneradapter.ProvisionRequest, runneradapter.ProvisionObserver) (runneradapter.Provisioned, error)
+	SaveConfig      func(string, config.Runtime) error
+	Now             func() time.Time
 }
 
 // DefaultDependencies uses the operating-system keyring and local probes.
@@ -116,11 +118,20 @@ func DefaultDependencies() Dependencies {
 		Diagnose: func(ctx context.Context, runtime config.Runtime, resolve func(string) (string, bool)) (doctor.Report, error) {
 			options := doctor.DefaultOptions()
 			options.Model = doctor.HTTPModelProbe{LookupEnv: resolve}
+			if runtime.RunnerMode == config.RunnerDocker {
+				probe, err := runneradapter.New(runneradapter.ConfigForRuntime(runtime), runneradapter.Options{})
+				if err != nil {
+					return doctor.Report{}, err
+				}
+				options.Runner = probe
+			}
 			return doctor.Run(ctx, runtime, options)
 		},
-		RunnerReady: localRunnerReady,
-		SaveConfig:  config.SaveAtomic,
-		Now:         time.Now,
+		ProvisionRunner: func(ctx context.Context, request runneradapter.ProvisionRequest, observer runneradapter.ProvisionObserver) (runneradapter.Provisioned, error) {
+			return runneradapter.Provision(ctx, request, runneradapter.ProvisionOptions{}, observer)
+		},
+		SaveConfig: config.SaveAtomic,
+		Now:        time.Now,
 	}
 }
 
@@ -158,6 +169,13 @@ func Run(ctx context.Context, request Request, dependencies Dependencies, observ
 			))
 		}
 		start = stageIndex(checkpoint.Stage)
+		if start > stageIndex(StageRunner) && checkpoint.Runtime.RunnerMode == config.RunnerDocker {
+			if validateErr := checkpoint.Runtime.Validate(); validateErr != nil {
+				return Result{}, fail(observer, setupFailure("validate resumed Runner metadata", validateErr))
+			}
+			candidate.RunnerMode = checkpoint.Runtime.RunnerMode
+			candidate.Runner = checkpoint.Runtime.Runner
+		}
 	}
 	if err := os.MkdirAll(candidate.DataDir, 0o700); err != nil {
 		return Result{}, fail(observer, setupFailure("create setup data directory", err))
@@ -171,10 +189,6 @@ func Run(ctx context.Context, request Request, dependencies Dependencies, observ
 	if err != nil {
 		return Result{}, fail(observer, err)
 	}
-	if request.Profile == ProfileFull && dependencies.RunnerReady(ctx) {
-		candidate.RunnerMode = config.RunnerDocker
-	}
-
 	notify(observer, async.NewPending[Progress]())
 	for index := start; index < len(stages); index++ {
 		if err := ctx.Err(); err != nil {
@@ -214,6 +228,27 @@ func Run(ctx context.Context, request Request, dependencies Dependencies, observ
 			if closeErr := store.Close(); closeErr != nil {
 				return Result{}, fail(observer, setupFailure("close initialized SQLite", closeErr))
 			}
+		case StageRunner:
+			if request.Profile != ProfileFull {
+				break
+			}
+			provisioned, provisionErr := dependencies.ProvisionRunner(ctx, runneradapter.ProvisionRequest{Version: version.Current().Version, DataDir: candidate.DataDir}, func(state async.State[runneradapter.ProvisionProgress]) {
+				if state.Phase == async.Streaming && state.Value != nil {
+					value := Progress{Stage: StageRunner, Current: index + 1, Total: len(stages), Message: "runner: " + string(state.Value.Stage)}
+					notify(observer, async.NewStreaming(&value))
+				}
+			})
+			if provisionErr != nil {
+				if errors.Is(provisionErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+					return Result{}, fail(observer, setupCancelled(provisionErr))
+				}
+				return Result{}, fail(observer, setupFailure("provision Full Practice Runner", provisionErr))
+			}
+			candidate.Runner = config.Runner{
+				Image: provisioned.Image, Digest: provisioned.Digest, Version: provisioned.Version,
+				Protocol: provisioned.Protocol, Architecture: provisioned.Architecture,
+			}
+			candidate.RunnerMode = config.RunnerDocker
 		case StageDiagnose:
 			_, diagnoseErr := dependencies.Diagnose(ctx, candidate, credential.resolve)
 			if diagnoseErr != nil {
@@ -407,8 +442,8 @@ func fillDependencies(value Dependencies) Dependencies {
 	if value.Diagnose == nil {
 		value.Diagnose = defaults.Diagnose
 	}
-	if value.RunnerReady == nil {
-		value.RunnerReady = defaults.RunnerReady
+	if value.ProvisionRunner == nil {
+		value.ProvisionRunner = defaults.ProvisionRunner
 	}
 	if value.SaveConfig == nil {
 		value.SaveConfig = defaults.SaveConfig
@@ -417,13 +452,6 @@ func fillDependencies(value Dependencies) Dependencies {
 		value.Now = defaults.Now
 	}
 	return value
-}
-
-func localRunnerReady(ctx context.Context) bool {
-	if err := exec.CommandContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}").Run(); err != nil {
-		return false
-	}
-	return exec.CommandContext(ctx, "docker", "image", "inspect", "interviewcraft-runner:local").Run() == nil
 }
 
 func stageIndex(stage Stage) int {
@@ -443,7 +471,9 @@ func checkpointMatches(checkpoint Checkpoint, profile Profile, candidate config.
 	// between attempts; it is never an input that authorizes remote work.
 	stored := checkpoint.Runtime
 	stored.RunnerMode = config.RunnerDisabled
+	stored.Runner = config.Runner{}
 	candidate.RunnerMode = config.RunnerDisabled
+	candidate.Runner = config.Runner{}
 	return reflect.DeepEqual(stored, candidate)
 }
 
@@ -459,6 +489,8 @@ func stageMessage(stage Stage) string {
 		return "resolving secure credential reference"
 	case StageInitialize:
 		return "initializing SQLite"
+	case StageRunner:
+		return "provisioning signed Runner image"
 	case StageDiagnose:
 		return "running doctor"
 	case StageComplete:

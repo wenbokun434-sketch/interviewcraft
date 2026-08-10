@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/interviewcraft/interviewcraft/internal/core/domainerr"
@@ -24,8 +25,10 @@ const (
 	ProviderOpenAICompatible = "openai-compatible"
 	ProviderOllama           = "ollama"
 
-	RunnerDisabled = "disabled"
-	RunnerDocker   = "docker"
+	RunnerDisabled   = "disabled"
+	RunnerDocker     = "docker"
+	RunnerProtocol   = "interviewcraft-runner-response-v1"
+	RunnerRepository = "ghcr.io/wenbokun434-sketch/interviewcraft-runner"
 
 	AudioBrowser = "browser"
 )
@@ -48,6 +51,28 @@ type LLM struct {
 	APIKeyEnv string `json:"api_key_env"`
 }
 
+// Runner contains only verified, non-secret image metadata. Image is the
+// canonical repository and Digest is always an immutable sha256 reference.
+type Runner struct {
+	Image        string `json:"image"`
+	Digest       string `json:"digest"`
+	Version      string `json:"version"`
+	Protocol     string `json:"protocol"`
+	Architecture string `json:"architecture"`
+}
+
+// Reference returns the immutable image reference accepted by Docker/Cosign.
+func (runner Runner) Reference() string {
+	if strings.TrimSpace(runner.Image) == "" || strings.TrimSpace(runner.Digest) == "" {
+		return ""
+	}
+	return runner.Image + "@" + runner.Digest
+}
+
+func (runner Runner) empty() bool {
+	return runner == (Runner{})
+}
+
 // Runtime is the complete Lite runtime configuration.
 type Runtime struct {
 	Version       int    `json:"version"`
@@ -55,8 +80,14 @@ type Runtime struct {
 	DatabaseName  string `json:"database_name"`
 	LLM           LLM    `json:"llm"`
 	RunnerMode    string `json:"runner_mode"`
+	Runner        Runner `json:"runner"`
 	AudioProvider string `json:"audio_provider"`
 }
+
+var (
+	runnerDigestPattern  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	runnerVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$`)
+)
 
 // Metadata describes where configuration was resolved.
 type Metadata struct {
@@ -298,6 +329,23 @@ func (runtime Runtime) Validate() error {
 
 	if runtime.RunnerMode != RunnerDisabled && runtime.RunnerMode != RunnerDocker {
 		issues = append(issues, "runner_mode must be disabled or docker")
+	}
+	if runtime.RunnerMode == RunnerDocker || !runtime.Runner.empty() {
+		if runtime.Runner.Image != RunnerRepository {
+			issues = append(issues, "runner.image must be the official repository")
+		}
+		if !runnerDigestPattern.MatchString(runtime.Runner.Digest) {
+			issues = append(issues, "runner.digest must be a lowercase sha256 digest")
+		}
+		if !runnerVersionPattern.MatchString(runtime.Runner.Version) {
+			issues = append(issues, "runner.version must be a semantic version")
+		}
+		if runtime.Runner.Protocol != RunnerProtocol {
+			issues = append(issues, "runner.protocol is incompatible")
+		}
+		if runtime.Runner.Architecture != "amd64" && runtime.Runner.Architecture != "arm64" {
+			issues = append(issues, "runner.architecture must be amd64 or arm64")
+		}
 	}
 	if runtime.AudioProvider != AudioBrowser {
 		issues = append(issues, "audio_provider must be browser for Lite MVP")

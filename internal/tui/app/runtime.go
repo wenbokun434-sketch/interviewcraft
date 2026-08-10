@@ -103,12 +103,16 @@ func NewRuntimeFactory(
 	var codeRunner corecoding.Runner
 	if runtime.RunnerMode == config.RunnerDocker {
 		value, runnerErr := runneradapter.New(
-			runneradapter.DefaultConfig(), runneradapter.Options{},
+			runneradapter.ConfigForRuntime(runtime), runneradapter.Options{},
 		)
-		if runnerErr != nil {
-			return nil, runnerErr
+		if runnerErr == nil {
+			diagnoseContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			_, diagnoseErr := value.Diagnose(diagnoseContext)
+			cancel()
+			if diagnoseErr == nil {
+				codeRunner = value
+			}
 		}
-		codeRunner = value
 	}
 	codingService, err := corecoding.NewService(store, corecoding.Options{
 		Runner: codeRunner,

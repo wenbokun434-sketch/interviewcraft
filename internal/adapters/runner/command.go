@@ -12,6 +12,30 @@ type osCommand struct {
 	maxOutputBytes int
 }
 
+type cosignVerifier struct {
+	binary         string
+	maxOutputBytes int
+}
+
+func (verifier cosignVerifier) VerifyImage(
+	ctx context.Context,
+	image string,
+	identity string,
+	issuer string,
+) error {
+	command := osCommand{binary: verifier.binary, maxOutputBytes: verifier.maxOutputBytes}
+	result, err := command.Run(ctx, nil,
+		"verify",
+		"--certificate-identity", identity,
+		"--certificate-oidc-issuer", issuer,
+		image,
+	)
+	if err != nil || result.ExitCode != 0 {
+		return errors.New("runner image signature verification failed")
+	}
+	return nil
+}
+
 func (command osCommand) Run(
 	ctx context.Context,
 	stdin []byte,

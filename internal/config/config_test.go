@@ -135,6 +135,7 @@ func TestEnvironmentOverridesStrictFile(t *testing.T) {
 		Model:     "file-model",
 		APIKeyEnv: "OPENAI_API_KEY",
 	}
+	fileRuntime.Runner = validRunnerMetadata()
 	payload, err := json.Marshal(fileRuntime)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -219,6 +220,32 @@ func TestValidateRejectsUnsupportedOptionalModes(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresCompleteVerifiedRunnerMetadata(t *testing.T) {
+	runtime := defaults(t.TempDir())
+	runtime.RunnerMode = RunnerDocker
+	if err := runtime.Validate(); err == nil {
+		t.Fatal("docker mode was accepted without verified metadata")
+	}
+	runtime.Runner = validRunnerMetadata()
+	if err := runtime.Validate(); err != nil {
+		t.Fatalf("valid released Runner metadata: %v", err)
+	}
+	mutations := []func(*Runner){
+		func(value *Runner) { value.Image = "ghcr.io/attacker/runner" },
+		func(value *Runner) { value.Digest = "sha256:" + strings.Repeat("A", 64) },
+		func(value *Runner) { value.Version = "dev" },
+		func(value *Runner) { value.Protocol = "runner-v0" },
+		func(value *Runner) { value.Architecture = "386" },
+	}
+	for _, mutate := range mutations {
+		candidate := runtime
+		mutate(&candidate.Runner)
+		if err := candidate.Validate(); err == nil {
+			t.Fatalf("invalid Runner metadata was accepted: %#v", candidate.Runner)
+		}
+	}
+}
+
 func TestValidateRejectsCredentialsInProviderEndpoint(t *testing.T) {
 	t.Parallel()
 
@@ -252,4 +279,11 @@ func testSource(home string, environment map[string]string) Source {
 func escapedJSONPath(value string) string {
 	payload, _ := json.Marshal(value)
 	return strings.Trim(string(payload), `"`)
+}
+
+func validRunnerMetadata() Runner {
+	return Runner{
+		Image: RunnerRepository, Digest: "sha256:" + strings.Repeat("a", 64),
+		Version: "1.2.3", Protocol: RunnerProtocol, Architecture: "amd64",
+	}
 }

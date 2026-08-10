@@ -5,7 +5,7 @@ InterviewCraft 是一款本地优先、面向终端的面试训练工具。它�
 Lite 版本采用单个 Go 二进制文件和内嵌 SQLite：
 
 - 默认不需要 Docker、Node.js、Java、Python 或外部数据库；
-- `RUNNER_MODE` 默认且必须保持为 `disabled`；
+- `RUNNER_MODE` 默认保持为 `disabled`；只有 Full setup 完成签名、digest、镜像策略与隔离 smoke 检查后才会原子启用；
 - 支持 OpenAI-compatible 和 Ollama 模型服务；
 - 简历、草稿、训练记录、代码证据和报告默认保存在本机；
 - 报告中的结论必须关联持久化证据，证据不足时明确标记为“证据不足”。
@@ -371,17 +371,14 @@ interviewcraft run --reduce-motion
 部署顺序：
 
 1. 安装并启动可信任的本地 Docker daemon；
-2. 从仓库根目录、仅以 `docker/runner` 为构建上下文构建镜像；
-3. 运行真实隔离攻击门；
-4. 隔离门全部通过后才设置 `RUNNER_MODE=docker`；
-5. 运行 `doctor` 验证镜像标签、默认用户和 daemon 状态。
+2. 运行 Full setup；
+3. setup 从对应应用版本的签名 Runner 清单解析当前架构 digest，拉取并验证 GHCR 镜像；
+4. 签名、标签、版本、协议、默认用户和隔离 smoke 全部通过后，配置才切换为 `RUNNER_MODE=docker`；
+5. `doctor` 在每次诊断时重新验证 daemon、签名和完整镜像策略。
 
 ```powershell
-docker build -t interviewcraft-runner:local docker/runner
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-runner-isolation.ps1
-
-$env:RUNNER_MODE = "docker"
-interviewcraft doctor
+interviewcraft setup --profile full --restart
+interviewcraft run
 ```
 
 若需要退回 Lite：
@@ -549,15 +546,23 @@ interviewcraft run
 
 ## 启用 Docker Runner
 
-### 构建镜像
+### 正式镜像与开发镜像
 
-必须从仓库根目录运行，并将 `docker/runner` 作为唯一上下文：
+正式用户不需要从源码构建 Runner。发布流水线分别构建 linux/amd64 与 linux/arm64 镜像，以 keyless Sigstore 身份签名每个不可变 digest，并发布一个同样签名的严格 Runner 清单。启用命令是：
+
+```text
+interviewcraft setup --profile full --restart
+```
+
+setup 不会安装或启动 Docker，也不会请求管理员/root 权限。Docker、Registry、签名、digest、架构、标签、版本、协议、`65532:65532` 默认用户或隔离 smoke 任一检查失败时，Runner 保持 disabled，新增镜像引用会被清理，Lite 文字训练不受影响。
+
+仓库开发者仍必须从仓库根目录运行，并将 `docker/runner` 作为唯一上下文构建本地测试镜像：
 
 ```powershell
 docker build -t interviewcraft-runner:local docker/runner
 ```
 
-不要改为以下命令：
+该本地镜像只用于隔离攻击门，不能写入正式 Runner 配置或绕过发布签名。不要改为以下命令：
 
 ```text
 docker build -f docker/runner/Dockerfile .
@@ -670,16 +675,14 @@ $env:RUNNER_MODE = "disabled"
 
 Runner 警告不会阻塞 Lite。不要为消除警告而安装不需要的 Docker。
 
-### Runner 镜像不存在或不健康
+### Runner 镜像不存在、签名无效或不健康
 
 ```powershell
-docker build -t interviewcraft-runner:local docker/runner
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-runner-isolation.ps1
-$env:RUNNER_MODE = "docker"
+interviewcraft setup --profile full --restart
 interviewcraft doctor
 ```
 
-不要删除安全参数来换取语言测试通过。
+不要只设置 `RUNNER_MODE=docker`。缺少与应用版本匹配的官方仓库、不可变 digest、协议和架构元数据时，配置验证会拒绝启用；也不要删除安全参数来换取语言测试通过。
 
 ### PowerShell 拒绝执行脚本
 

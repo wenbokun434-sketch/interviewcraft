@@ -72,6 +72,7 @@ try {
     Invoke-Native -FilePath $GoBinary -Arguments @("build", "-trimpath", "-o", $binary, "./cmd/interviewcraft")
     & (Join-Path $PSScriptRoot "test-fresh-install.ps1") -GoBinary $GoBinary -BinaryPath $binary
     & (Join-Path $PSScriptRoot "test-release-metadata.ps1") -GoBinary $GoBinary
+    & (Join-Path $PSScriptRoot "test-runner-release.ps1")
     if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         if ($SkipRunnerIsolation) {
             & (Join-Path $PSScriptRoot "test-installers.ps1") -GoBinary $GoBinary -SkipLinuxContainer

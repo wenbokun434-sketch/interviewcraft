@@ -105,7 +105,7 @@ func TestSetupPrivateLocalNonInteractive(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("setup exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "[7/7]") || stderr.Len() != 0 {
+	if !strings.Contains(stdout.String(), "[8/8]") || stderr.Len() != 0 {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "config.json")); err != nil {

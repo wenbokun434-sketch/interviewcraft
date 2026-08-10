@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	runneradapter "github.com/interviewcraft/interviewcraft/internal/adapters/runner"
 	"github.com/interviewcraft/interviewcraft/internal/config"
 	"github.com/interviewcraft/interviewcraft/internal/core/async"
 	"github.com/interviewcraft/interviewcraft/internal/credentials"
@@ -25,7 +26,6 @@ func TestSetupProfilesMainEmptyAndProgress(t *testing.T) {
 	}{
 		{name: "lite", profile: ProfileLite, provider: config.ProviderOpenAICompatible, secret: "top-secret-value"},
 		{name: "private local", profile: ProfilePrivateLocal, provider: config.ProviderOllama},
-		{name: "full without image", profile: ProfileFull, provider: config.ProviderOpenAICompatible, secret: "top-secret-value"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -141,11 +141,16 @@ func TestSetupRepeatIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestSetupFullEnablesOnlyInjectedReadyLocalRunner(t *testing.T) {
+func TestSetupFullEnablesOnlyProvisionedSignedRunner(t *testing.T) {
 	dataDir := t.TempDir()
 	store := &fakeCredentialStore{}
 	deps := testDependencies(store)
-	deps.RunnerReady = func(context.Context) bool { return true }
+	deps.ProvisionRunner = func(context.Context, runneradapter.ProvisionRequest, runneradapter.ProvisionObserver) (runneradapter.Provisioned, error) {
+		return runneradapter.Provisioned{
+			Image: config.RunnerRepository, Digest: "sha256:" + strings.Repeat("a", 64),
+			Version: "1.2.3", Protocol: config.RunnerProtocol, Architecture: "amd64",
+		}, nil
+	}
 	var diagnosedMode string
 	deps.Diagnose = func(_ context.Context, runtime config.Runtime, resolve func(string) (string, bool)) (doctor.Report, error) {
 		diagnosedMode = runtime.RunnerMode
@@ -162,6 +167,84 @@ func TestSetupFullEnablesOnlyInjectedReadyLocalRunner(t *testing.T) {
 	}
 	if !result.RunnerReady || result.Runtime.RunnerMode != config.RunnerDocker || diagnosedMode != config.RunnerDocker {
 		t.Fatalf("result=%#v diagnosedMode=%q", result, diagnosedMode)
+	}
+}
+
+func TestSetupFullFailureKeepsExistingConfigDisabled(t *testing.T) {
+	dataDir := t.TempDir()
+	store := &fakeCredentialStore{}
+	deps := testDependencies(store)
+	deps.ProvisionRunner = func(context.Context, runneradapter.ProvisionRequest, runneradapter.ProvisionObserver) (runneradapter.Provisioned, error) {
+		return runneradapter.Provisioned{}, errors.New("registry unavailable")
+	}
+	_, err := Run(context.Background(), Request{
+		Profile: ProfileFull, DataDir: dataDir, APIKey: "full-secret",
+	}, deps, nil)
+	if err == nil {
+		t.Fatal("Full setup succeeded without a verified Runner")
+	}
+	if _, statErr := os.Stat(filepath.Join(dataDir, config.ConfigFileName)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("failed Full setup committed configuration: %v", statErr)
+	}
+	checkpoint, found, loadErr := loadCheckpoint(filepath.Join(dataDir, StateFileName))
+	if loadErr != nil || !found || checkpoint.Stage != StageRunner || checkpoint.Runtime.RunnerMode != config.RunnerDisabled {
+		t.Fatalf("checkpoint=%#v found=%v err=%v", checkpoint, found, loadErr)
+	}
+}
+
+func TestSetupFullReportsRunnerStagesAndCancellation(t *testing.T) {
+	dataDir := t.TempDir()
+	deps := testDependencies(&fakeCredentialStore{})
+	deps.ProvisionRunner = func(ctx context.Context, _ runneradapter.ProvisionRequest, observer runneradapter.ProvisionObserver) (runneradapter.Provisioned, error) {
+		for index, stage := range []runneradapter.ProvisionStage{
+			runneradapter.ProvisionResolve, runneradapter.ProvisionPull, runneradapter.ProvisionVerify,
+		} {
+			progress := runneradapter.ProvisionProgress{Stage: stage, Current: index + 1, Total: 6}
+			observer(async.NewStreaming(&progress))
+		}
+		return runneradapter.Provisioned{}, context.Canceled
+	}
+	var runnerMessages []string
+	_, err := Run(context.Background(), Request{Profile: ProfileFull, DataDir: dataDir, APIKey: "secret"}, deps, func(state async.State[Progress]) {
+		if state.Phase == async.Streaming && state.Value != nil && state.Value.Stage == StageRunner {
+			runnerMessages = append(runnerMessages, state.Value.Message)
+		}
+	})
+	if err == nil || len(runnerMessages) != 4 ||
+		!strings.Contains(strings.Join(runnerMessages, " "), "runner: resolve") ||
+		!strings.Contains(strings.Join(runnerMessages, " "), "runner: pull") ||
+		!strings.Contains(strings.Join(runnerMessages, " "), "runner: signature") {
+		t.Fatalf("messages=%v err=%v", runnerMessages, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dataDir, config.ConfigFileName)); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("cancelled Full setup committed configuration: %v", statErr)
+	}
+}
+
+func TestSetupFullResumeRevalidatesProvisionedMetadataWithoutRepull(t *testing.T) {
+	dataDir := t.TempDir()
+	store := &fakeCredentialStore{}
+	deps := testDependencies(store)
+	provisions := 0
+	deps.ProvisionRunner = func(context.Context, runneradapter.ProvisionRequest, runneradapter.ProvisionObserver) (runneradapter.Provisioned, error) {
+		provisions++
+		return runneradapter.Provisioned{
+			Image: config.RunnerRepository, Digest: "sha256:" + strings.Repeat("d", 64),
+			Version: "2.0.0", Protocol: config.RunnerProtocol, Architecture: "arm64",
+		}, nil
+	}
+	deps.Diagnose = func(context.Context, config.Runtime, func(string) (string, bool)) (doctor.Report, error) {
+		return doctor.Report{}, context.Canceled
+	}
+	request := Request{Profile: ProfileFull, DataDir: dataDir, APIKey: "secret"}
+	if _, err := Run(context.Background(), request, deps, nil); err == nil {
+		t.Fatal("cancelled diagnose succeeded")
+	}
+	deps.Diagnose = testDependencies(store).Diagnose
+	result, err := Run(context.Background(), request, deps, nil)
+	if err != nil || !result.Resumed || result.Runtime.RunnerMode != config.RunnerDocker ||
+		result.Runtime.Runner.Digest != "sha256:"+strings.Repeat("d", 64) || provisions != 1 {
+		t.Fatalf("result=%#v provisions=%d err=%v", result, provisions, err)
 	}
 }
 
@@ -245,8 +328,10 @@ func testDependencies(store credentials.Store) Dependencies {
 			}
 			return doctor.Report{}, nil
 		},
-		RunnerReady: func(context.Context) bool { return false },
-		SaveConfig:  config.SaveAtomic,
-		Now:         func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
+		ProvisionRunner: func(context.Context, runneradapter.ProvisionRequest, runneradapter.ProvisionObserver) (runneradapter.Provisioned, error) {
+			return runneradapter.Provisioned{}, errors.New("Runner is unavailable in this test")
+		},
+		SaveConfig: config.SaveAtomic,
+		Now:        func() time.Time { return time.Unix(1_700_000_000, 0).UTC() },
 	}
 }

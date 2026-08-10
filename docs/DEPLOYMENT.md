@@ -12,7 +12,7 @@ Use the same binary and SQLite layout, but point `INTERVIEWCRAFT_LLM_PROVIDER=ol
 
 ### Full Practice
 
-Start from either Lite tier, build `interviewcraft-runner:local` from the narrow `docker/runner` context, pass `scripts/test-runner-isolation.ps1`, and then set `RUNNER_MODE=docker`. Docker, Python, Node.js, and Java remain optional: only Docker is installed on the host, and the language runtimes are contained in the Runner image.
+Start from either Lite tier and run `interviewcraft setup --profile full --restart`. Setup resolves the signed Runner manifest for the installed application version, selects linux/amd64 or linux/arm64, pulls the immutable GHCR digest, verifies the exact GitHub Actions identity and OIDC issuer, inspects labels/default user/platform, and runs an isolated smoke test before atomically enabling `RUNNER_MODE=docker`. Setup never installs or starts Docker. Python, Node.js, and Java remain inside the Runner image.
 
 ## Platform installation
 
@@ -34,7 +34,7 @@ interviewcraft run
 
 `init` is idempotent. The default directory is `~/.interviewcraft`; set `INTERVIEWCRAFT_DATA_DIR` before `init` to choose another location. The selected user must be able to create and replace files in that directory.
 
-`doctor` returns non-zero when the data directory, SQLite, terminal, or configured model Provider blocks training. Runner diagnostics are non-blocking while disabled.
+`doctor` returns non-zero when the data directory, SQLite, terminal, or configured model Provider blocks training. Runner diagnostics are non-blocking while disabled. When enabled, `doctor` re-verifies the image signature, repository digest, architecture, version/protocol labels, default user, and Docker daemon before reporting it ready.
 
 ## Configuration
 
@@ -67,10 +67,10 @@ The target must contain no training data. Import is atomic and does not overwrit
 
 ## Tier changes and rollback
 
-Moving from Lite to Full Practice changes only `RUNNER_MODE` after the image and isolation gate pass. Moving back is immediate: set `RUNNER_MODE=disabled`, rerun `doctor`, and continue the text path. Existing code evidence remains part of completed sessions, but no new code process starts.
+Moving from Lite to Full Practice writes immutable, non-secret Runner metadata and changes `RUNNER_MODE` only after every provisioning gate passes. Do not enable the mode with an environment variable alone. Moving back is immediate: set `RUNNER_MODE=disabled`, rerun `doctor`, and continue the text path. Existing code evidence remains part of completed sessions, but no new code process starts.
 
 Changing model Providers does not rewrite prior evidence. Diagnose the new endpoint before starting a new scenario, and retain the old model setting until the new configuration passes.
 
 ## Release automation
 
-`.goreleaser.yaml` builds CGO-free Windows, Linux, and macOS archives for amd64 and arm64 and emits `checksums.txt`. The quality script independently cross-compiles all six OS/architecture targets before publication. Tagged releases run the complete quality gate before GoReleaser publishes artifacts. Ordinary CI separates the Docker-free Lite job from the explicit Runner isolation job.
+`.goreleaser.yaml` builds CGO-free Windows, Linux, and macOS archives for amd64 and arm64 and emits `checksums.txt`. The quality script independently cross-compiles all six OS/architecture targets before publication. Tagged releases run the complete quality gate, build linux/amd64 and linux/arm64 Runner images, sign each digest keylessly, generate/sign `runner-manifest.txt`, and re-download and verify all assets while the release is still Draft. Ordinary CI separates the Docker-free Lite job from the explicit Runner isolation job.

@@ -16,7 +16,7 @@ func TestDiagnoseReportsOnlySafePolicyAndHealth(t *testing.T) {
 		case "version":
 			return CommandResult{Stdout: []byte("29.1.3\n")}, nil
 		case "image":
-			return CommandResult{Stdout: []byte("true\n")}, nil
+			return CommandResult{Stdout: localInspectionPayload("true")}, nil
 		default:
 			return CommandResult{}, errors.New("unexpected command")
 		}
@@ -53,7 +53,7 @@ func TestDiagnoseFailsClosedForDockerAndImage(t *testing.T) {
 				if first(args) == "version" {
 					return CommandResult{Stdout: []byte("29.1.3")}, nil
 				}
-				return CommandResult{Stdout: []byte("false")}, nil
+				return CommandResult{Stdout: localInspectionPayload("false")}, nil
 			},
 		},
 	} {
@@ -65,6 +65,32 @@ func TestDiagnoseFailsClosedForDockerAndImage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDiagnoseReleasedImageVerifiesCompletePolicy(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	image := ManifestImage{OS: "linux", Architecture: "amd64", Repository: OfficialRepository, Digest: digest, Protocol: responseVersion}
+	config := ReleaseConfig(image, "1.2.3", CertificateIdentityURL+"1.2.3")
+	command := &fakeCommand{handler: func(_ context.Context, _ []byte, args []string) (CommandResult, error) {
+		if first(args) == "version" {
+			return CommandResult{Stdout: []byte("29.1.3")}, nil
+		}
+		return CommandResult{Stdout: []byte(`[{"RepoDigests":["` + OfficialRepository + `@` + digest + `"],"Os":"linux","Architecture":"amd64","Config":{"User":"65532:65532","Labels":{"io.interviewcraft.runner":"true","io.interviewcraft.version":"1.2.3","io.interviewcraft.protocol":"` + responseVersion + `"}}}]`)}, nil
+	}}
+	verifier := &provisionVerifierStub{}
+	adapter, err := New(config, Options{Command: command, SignatureVerifier: verifier})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	diagnostic, err := adapter.Diagnose(context.Background())
+	if err != nil || !diagnostic.SignatureVerified || diagnostic.Digest != digest ||
+		diagnostic.Version != "1.2.3" || diagnostic.Protocol != responseVersion || diagnostic.Architecture != "amd64" || verifier.images != 1 {
+		t.Fatalf("diagnostic=%#v verifier=%#v err=%v", diagnostic, verifier, err)
+	}
+}
+
+func localInspectionPayload(label string) []byte {
+	return []byte(`[{"RepoDigests":[],"Os":"linux","Architecture":"amd64","Config":{"User":"65532:65532","Labels":{"io.interviewcraft.runner":"` + label + `"}}}]`)
 }
 
 func TestConfigDefaultsAndRejectsWeakenedIsolation(t *testing.T) {

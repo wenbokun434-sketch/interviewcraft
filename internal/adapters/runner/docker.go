@@ -23,6 +23,7 @@ type DockerRunner struct {
 	newContainerName func() string
 	observer         Observer
 	now              func() time.Time
+	verifier         SignatureVerifier
 }
 
 // New creates an explicitly configured Docker adapter. It does not start
@@ -46,9 +47,13 @@ func New(config Config, options Options) (*DockerRunner, error) {
 	if now == nil {
 		now = time.Now
 	}
+	verifier := options.SignatureVerifier
+	if verifier == nil && config.ExpectedDigest != "" {
+		verifier = cosignVerifier{binary: config.CosignBinary, maxOutputBytes: config.Limits.MaxOutputBytes}
+	}
 	return &DockerRunner{
 		config: config, command: command, newContainerName: newName,
-		observer: options.Observer, now: now,
+		observer: options.Observer, now: now, verifier: verifier,
 	}, nil
 }
 

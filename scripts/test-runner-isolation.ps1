@@ -36,7 +36,12 @@ if ($existing.Count -ne 0) {
 
 $gatePassed = $false
 try {
-    $buildArguments = @("build", "--progress=plain")
+    $buildArguments = @(
+        "build", "--progress=plain",
+        "--build-arg", "APPLICATION_VERSION=0.0.0-test",
+        "--build-arg", "GIT_COMMIT=0000000000000000000000000000000000000000",
+        "--build-arg", "RUNNER_PROTOCOL=interviewcraft-runner-response-v1"
+    )
     if (-not [string]::IsNullOrWhiteSpace($BuildProxy)) {
         foreach ($name in @("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")) {
             $buildArguments += @("--build-arg", "${name}=$BuildProxy")
@@ -57,6 +62,10 @@ try {
     }
     if ($inspect.Config.Labels."io.interviewcraft.runner" -ne "true") {
         throw "Runner image label is invalid"
+    }
+    if ($inspect.Config.Labels."io.interviewcraft.version" -ne "0.0.0-test" -or
+        $inspect.Config.Labels."io.interviewcraft.protocol" -ne "interviewcraft-runner-response-v1") {
+        throw "Runner image version or protocol label is invalid"
     }
     if ($inspect.Config.User -ne "65532:65532") {
         throw "Runner image default user is invalid"

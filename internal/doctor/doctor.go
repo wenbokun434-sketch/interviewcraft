@@ -317,7 +317,7 @@ func checkRunner(ctx context.Context, mode string, probe RunnerProbe) Check {
 			Name:           "runner",
 			Status:         Warning,
 			Message:        "Docker Runner 已禁用；文字面试仍可使用。",
-			RecoveryAction: "需要运行代码时设置 RUNNER_MODE=docker。",
+			RecoveryAction: "需要运行代码时执行 `interviewcraft setup --profile full --restart`。",
 		}
 	}
 	if err := probe.Check(ctx); err != nil {
@@ -325,7 +325,7 @@ func checkRunner(ctx context.Context, mode string, probe RunnerProbe) Check {
 			Name:           "runner",
 			Status:         Warning,
 			Message:        "Docker Runner 当前不可用；文字面试仍可使用。",
-			RecoveryAction: "启动 Docker 并重新运行 doctor。",
+			RecoveryAction: "启动 Docker 后重新运行 `interviewcraft setup --profile full --restart`。",
 		}
 	}
 	return Check{

@@ -23,7 +23,7 @@ Protect the data directory with operating-system permissions appropriate for pri
 
 ## Optional Docker Runner
 
-`RUNNER_MODE` defaults to `disabled`. Enabling it requires a trusted local Docker daemon and the image label `io.interviewcraft.runner=true` with default user `65532:65532`.
+`RUNNER_MODE` defaults to `disabled`. It is enabled only by Full setup after verifying the signed release manifest and exact immutable image digest. The accepted certificate identity is the tagged repository release workflow and the issuer is GitHub Actions OIDC. Doctor and runtime startup re-check the signature, official repository digest, linux/amd64 or linux/arm64 architecture, application version, protocol label, `io.interviewcraft.runner=true`, and default user `65532:65532`.
 
 Every submitted program runs in a newly created container with:
 
@@ -46,13 +46,13 @@ The host sends only a versioned question ID, language, and submitted source over
 
 Hidden inputs, expected outputs, test source, raw stderr, submitted source, environment values, secrets, and host/container paths have no public protocol field. Invalid or oversized protocol data is rejected.
 
-Build with `docker/runner` as the complete build context. Do not change the context to the repository root. The dedicated gate validates Python, JavaScript, and Java happy/failing cases plus infinite-loop, network, memory, and process-fork attacks, then requires zero residual integration containers:
+Release images are built with `docker/runner` as the complete build context. Do not change the context to the repository root. The dedicated gate validates Python, JavaScript, and Java happy/failing cases plus infinite-loop, network, memory, and process-fork attacks, then requires zero residual integration containers:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-runner-isolation.ps1
 ```
 
-Do not remove an isolation flag to make a language test pass. Diagnose image/runtime compatibility and keep Lite disabled until the complete gate succeeds.
+Do not remove an isolation flag to make a language test pass. A failed Registry request, signature, digest, architecture, label, user, protocol, daemon, smoke, or cancellation gate removes a newly introduced image reference and leaves the persisted mode disabled. Lite and Private Local never contact Docker or the Runner registry.
 
 ## Trust boundary and limitations
 
