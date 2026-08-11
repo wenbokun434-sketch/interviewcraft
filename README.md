@@ -94,6 +94,30 @@ curl -fsSL https://raw.githubusercontent.com/wenbokun434-sketch/interviewcraft/m
 
 API Key 只可通过 `-ApiKeyStdin`/`--api-key-stdin` 传入。安装器先用仓库固定 SHA-256 验证 Cosign v3.1.3，再验证发布清单的 Sigstore bundle、精确 GitHub Actions 发布者身份和 OIDC issuer，随后验证归档 hash/size、路径和内嵌版本，最后原子安装。同版本重复执行是幂等的；对已安装版本传入更新版本时，安装器转交内置可信更新器，不会直接覆盖现有二进制。
 
+### 安装完成后启动
+
+安装器完成 `setup → doctor` 后不会占用当前终端自动进入 TUI。关闭并重新打开终端，让用户 PATH 生效，然后运行：
+
+```text
+interviewcraft version
+interviewcraft doctor
+interviewcraft run
+```
+
+`interviewcraft run` 是日常的一键启动命令，会保持常驻直到用户退出。若 Windows 当前终端尚未刷新 PATH，可直接启动已验证安装目录中的程序：
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\InterviewCraft\bin\interviewcraft.exe" run
+```
+
+Windows CMD 使用：
+
+```bat
+"%LOCALAPPDATA%\Programs\InterviewCraft\bin\interviewcraft.exe" run
+```
+
+Linux/macOS 可以重新打开终端，或执行 `. "$HOME/.profile"` 后运行 `interviewcraft run`。`interviewcraft run --once` 仅用于 CI、脚本和重定向输出，会渲染单帧后退出，不是日常交互启动方式。
+
 检查、升级和回滚：
 
 ```text
@@ -253,7 +277,7 @@ interviewcraft run
 interviewcraft run --once --ascii --reduce-motion --no-color
 ```
 
-如“当前实现状态”所述，现阶段该命令渲染一次主页后退出。
+不带 `--once` 的 `interviewcraft run` 会启动完整常驻 TUI；上面的 `run --once` 只渲染单帧后退出。
 
 <a id="configure-a-model-provider"></a>
 
