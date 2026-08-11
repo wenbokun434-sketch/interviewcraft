@@ -34,11 +34,11 @@ Lite 版本采用单个 Go 二进制文件和内嵌 SQLite：
 
 ## 当前实现状态
 
-MVP 的领域服务、SQLite 持久化、P-01～P-07 屏幕模型、三语言 Runner、隔离攻击测试、证据化报告和完整 E2E 已实现并具有自动化测试。
+T-001～T-029 已完成：领域服务、SQLite 持久化、P-01～P-07 常驻 TUI、三语言隔离 Runner、证据化报告，以及 `install → setup → doctor → run → update → rollback → uninstall` 一键部署生命周期均已接入自动化门禁。详细的部署与恢复边界见[部署文档](docs/DEPLOYMENT.md)，测试范围见[质量门说明](docs/QUALITY_GATES.md)。
 
-`interviewcraft run` 现在会启动常驻终端事件循环，并要求 stdin/stdout 都是交互终端。CI、脚本或重定向输出请使用 `interviewcraft run --once` 渲染单帧。
+当前版本已在本地实跑 Windows/amd64 与 Linux/amd64 的干净安装、幂等重装、完整训练、升级、回滚和保留数据卸载，并通过 Full Practice 的 Runner 隔离与零残留回归。macOS、arm64、GitHub OIDC、GHCR 和真实 Release 网络链路由 [deployment CI](.github/workflows/deployment.yml) 与 [release workflow](.github/workflows/release.yml) 执行；本地交叉编译不视为这些平台已经完成生命周期认证。
 
-`setup`、`init`、`doctor`、完整常驻 `run`、`export` 和 `import` 均可直接使用。训练屏幕通过同一事件循环完成完整业务闭环；退出后仍保留已经持久化的训练状态与草稿。
+`interviewcraft run` 会启动常驻终端事件循环，并要求 stdin/stdout 都是交互终端。CI、脚本或重定向输出请使用 `interviewcraft run --once` 渲染单帧。`setup`、`init`、`doctor`、完整常驻 `run`、`export` 和 `import` 均可直接使用；退出后仍保留已经持久化的训练状态与草稿。
 
 ## 功能概览
 
