@@ -28,6 +28,14 @@ Runner changes:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-runner-isolation.ps1
 ```
 
+Deployment lifecycle changes:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-deployment-e2e.ps1 -GoBinary go -EvidencePath .\deployment-evidence.json
+```
+
+On Linux/macOS, run `pwsh -NoProfile -File ./scripts/test-deployment-e2e.ps1 -GoBinary go -EvidencePath ./deployment-evidence.json`. Use `-FullPractice` only on a trusted Docker host. Commit neither the evidence JSON nor temporary release fixtures; attach the evidence as a CI artifact instead.
+
 The root Go module and `docker/runner/agent` are separate modules. Do not report the agent as tested from a root-only `go test ./...`.
 
 ## Architecture rules

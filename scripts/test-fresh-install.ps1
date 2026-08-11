@@ -38,7 +38,7 @@ try {
             throw "$GoBinary env GOEXE failed"
         }
         $BinaryPath = Join-Path $smokeRoot ("interviewcraft" + $extension)
-        & $GoBinary build -trimpath -o $BinaryPath ./cmd/interviewcraft
+        & $GoBinary build -buildvcs=false -trimpath -o $BinaryPath ./cmd/interviewcraft
         if ($LASTEXITCODE -ne 0) {
             throw "$GoBinary build failed with exit code $LASTEXITCODE"
         }

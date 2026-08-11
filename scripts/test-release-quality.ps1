@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("interviewcraft-release-gate-" + [guid]::NewGuid().ToString("N"))
+$savedModuleCache = $env:PSModuleAnalysisCachePath
 
 function Invoke-Native {
     param(
@@ -24,6 +25,7 @@ Push-Location $repoRoot
 New-Item -ItemType Directory -Path $buildRoot | Out-Null
 try {
     $env:CGO_ENABLED = "0"
+    $env:PSModuleAnalysisCachePath = Join-Path ([System.IO.Path]::GetTempPath()) "interviewcraft-powershell-module-cache"
     if ([string]::IsNullOrWhiteSpace($env:GOCACHE)) {
         $env:GOCACHE = Join-Path ([System.IO.Path]::GetTempPath()) "interviewcraft-go-build-cache"
     }
@@ -48,7 +50,8 @@ try {
         throw "gofmt required for: $($unformatted -join ', ')"
     }
 
-    Invoke-Native -FilePath "git" -Arguments @("diff", "--check")
+    Invoke-Native -FilePath "git" -Arguments @("-c", "safe.directory=$repoRoot", "diff", "--check")
+    & (Join-Path $PSScriptRoot "test-deployment-contract.ps1")
     Invoke-Native -FilePath $GoBinary -Arguments @("mod", "verify")
     Invoke-Native -FilePath $GoBinary -Arguments @("vet", "./...")
     Invoke-Native -FilePath $GoBinary -Arguments @("test", "-count=1", "-cover", "./...")
@@ -69,7 +72,7 @@ try {
         throw "$GoBinary env GOEXE failed"
     }
     $binary = Join-Path $buildRoot ("interviewcraft" + $extension)
-    Invoke-Native -FilePath $GoBinary -Arguments @("build", "-trimpath", "-o", $binary, "./cmd/interviewcraft")
+    Invoke-Native -FilePath $GoBinary -Arguments @("build", "-buildvcs=false", "-trimpath", "-o", $binary, "./cmd/interviewcraft")
     & (Join-Path $PSScriptRoot "test-fresh-install.ps1") -GoBinary $GoBinary -BinaryPath $binary
     & (Join-Path $PSScriptRoot "test-release-metadata.ps1") -GoBinary $GoBinary
     & (Join-Path $PSScriptRoot "test-runner-release.ps1")
@@ -106,7 +109,7 @@ try {
                     $targetExtension = ".exe"
                 }
                 $targetBinary = Join-Path $releaseRoot ("interviewcraft_${targetOS}_${targetArch}${targetExtension}")
-                Invoke-Native -FilePath $GoBinary -Arguments @("build", "-trimpath", "-o", $targetBinary, "./cmd/interviewcraft")
+                Invoke-Native -FilePath $GoBinary -Arguments @("build", "-buildvcs=false", "-trimpath", "-o", $targetBinary, "./cmd/interviewcraft")
             }
         }
     }
@@ -122,11 +125,12 @@ try {
         }
     }
 
-    Invoke-Native -FilePath "git" -Arguments @("diff", "--check")
+    Invoke-Native -FilePath "git" -Arguments @("-c", "safe.directory=$repoRoot", "diff", "--check")
     Write-Output "InterviewCraft release quality gate passed."
 }
 finally {
     Pop-Location
+    $env:PSModuleAnalysisCachePath = $savedModuleCache
     $resolvedBuildRoot = [System.IO.Path]::GetFullPath($buildRoot)
     $resolvedTempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
     if ($resolvedBuildRoot.StartsWith($resolvedTempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and

@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.26.x'
           cache-dependency-path: go.sum
@@ -210,7 +210,7 @@ jobs:
             "${verify_dir}/release-manifest.txt"
           pwsh -NoProfile -File ./scripts/runner-manifest.ps1 \
             -Mode Verify -DistDirectory "${verify_dir}" -Version "${version}" -Commit "${GITHUB_SHA}"
-          while IFS=$'\t' read -r kind os arch repository digest protocol user; do
+          while IFS=$'\t' read -r kind _os _arch repository digest _protocol _user; do
             if test "${kind}" = image; then
               cosign verify --certificate-identity "${identity}" --certificate-oidc-issuer "${OIDC_ISSUER}" "${repository}@${digest}"
             fi

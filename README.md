@@ -736,6 +736,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-release-quali
 
 完整门禁还会构建 Runner 镜像并执行 Python、JavaScript、Java 主流程，以及死循环、禁网、内存炸弹和进程炸弹隔离测试；最后要求专用集成容器残留为 0。
 
+### 一键部署全链路验收
+
+以下复制粘贴命令也是 CI 实际执行的命令。它在临时、隔离的用户目录中验证 Lite 与 Private Local 的安装、幂等重装、setup、doctor、完整训练、重启、可信升级、篡改拒绝、回滚和保留数据卸载，不会修改真实用户 PATH。
+
+Windows PowerShell：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-deployment-e2e.ps1 -GoBinary go -EvidencePath .\deployment-evidence.json
+```
+
+Linux/macOS：
+
+```sh
+pwsh -NoProfile -File ./scripts/test-deployment-e2e.ps1 -GoBinary go -EvidencePath ./deployment-evidence.json
+```
+
+受支持的 Docker 主机还可追加 `-FullPractice`，验证签名 Runner 配置、Python/JavaScript/Java 和隔离攻击矩阵。证据 JSON 记录平台、架构、应用版本、Go 版本、提交 SHA、工作区是否有未提交修改、开始/结束时间、耗时和每项结果。仓库的 `deployment-e2e` 工作流在 Windows、Ubuntu 与 macOS 分别执行上述命令，并在 Ubuntu 另跑 Full Practice；本地没有相应系统或 Docker 时，应将该边界记为未运行，不能用交叉编译冒充真机通过。
+
 仓库根目录的 `go test ./...` 不会自动进入嵌套模块 `docker/runner/agent`，不能把根模块单独通过当作完整发布通过。
 
 详细证据矩阵见 [docs/QUALITY_GATES.md](docs/QUALITY_GATES.md)。发布归档配置见 [.goreleaser.yaml](.goreleaser.yaml)，CI 配置见 [.github/workflows/](.github/workflows/)。

@@ -90,3 +90,11 @@ The confirmation must equal the canonical data directory stored in the installat
 ## Release automation
 
 `.goreleaser.yaml` builds CGO-free Windows, Linux, and macOS archives for amd64 and arm64 and emits `checksums.txt`. The quality script independently cross-compiles all six OS/architecture targets before publication. Tagged releases run the complete quality gate, build linux/amd64 and linux/arm64 Runner images, sign each digest keylessly, generate/sign `runner-manifest.txt`, and re-download and verify all assets while the release is still Draft. Ordinary CI separates the Docker-free Lite job from the explicit Runner isolation job.
+
+## Clean deployment certification
+
+The `deployment-e2e` workflow runs the repository's documented command on `windows-latest`, `ubuntu-latest`, and `macos-latest`. Each job creates an isolated home, loopback-only Provider/release fixture, two real versioned application binaries, and a user-owned install directory. Lite and Private Local both perform install, idempotent reinstall, setup, doctor, 80x24 run, process restart, signed update, tamper rejection without mutation, no-update empty state, rollback, and uninstall while retaining configuration and a data marker. The same job separately executes the complete Lite training/evidence journey.
+
+An Ubuntu Docker job adds Full setup state/cancellation/recovery tests, signed Runner release metadata, all three language paths, resource attacks, and the zero-residual-container assertion. It never makes Docker, Go, Node.js, Python, Java, an external database, or elevation a Lite runtime prerequisite; build tools belong only to repository acceptance jobs.
+
+Every successful or failed invocation writes `interviewcraft-deployment-evidence-v1` JSON with the platform, architecture, tested application versions, Go version, commit SHA, worktree-dirty flag, UTC timestamps, duration, and named gate results. CI uploads one artifact per platform. A local report may claim only the host/container combinations actually executed; cross-compiling the six release targets validates buildability but does not certify a macOS lifecycle.

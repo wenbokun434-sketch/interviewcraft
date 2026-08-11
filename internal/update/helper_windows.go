@@ -18,8 +18,36 @@ func scheduleHelper(state State, statePath string) error {
 	if err := copyFile(state.BinaryPath, helper, 0o700); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(state.DiagnosticPath), 0o700); err != nil {
+		return err
+	}
+	log, err := os.OpenFile(state.DiagnosticPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer log.Close()
 	command := exec.Command(helper, "__update-helper", "--state", statePath, "--parent", strconv.Itoa(os.Getpid()))
-	command.Stdout, command.Stderr = nil, nil
+	command.Stdout, command.Stderr = log, log
+	return command.Start()
+}
+
+func scheduleRollbackHelper(statePath, dataDir, binaryPath, receiptPath string) error {
+	helperRoot := filepath.Join(filepath.Dir(statePath), "staging", "rollback-helper-"+strconv.Itoa(os.Getpid()))
+	helper := filepath.Join(helperRoot, "interviewcraft-rollback-helper.exe")
+	if err := copyFile(binaryPath, helper, 0o700); err != nil {
+		return err
+	}
+	state, err := readState(statePath)
+	if err != nil {
+		return err
+	}
+	log, err := os.OpenFile(state.DiagnosticPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer log.Close()
+	command := exec.Command(helper, "__rollback-helper", "--state", statePath, "--data-dir", dataDir, "--binary", binaryPath, "--receipt", receiptPath, "--parent", strconv.Itoa(os.Getpid()))
+	command.Stdout, command.Stderr = log, log
 	return command.Start()
 }
 

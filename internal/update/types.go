@@ -114,6 +114,7 @@ type Options struct {
 	Output              io.Writer
 	ForceDirect         bool
 	ScheduleHelper      func(State, string) error
+	ScheduleRollback    func(string, string, string, string) error
 	CreateBackup        func(context.Context, string, string, string, time.Time, func(string) (uint64, error)) (string, error)
 	RestoreBackup       func(context.Context, string, string, string, string, string) error
 	InstallBinary       func(string, string) error

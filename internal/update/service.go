@@ -244,6 +244,7 @@ func finalize(ctx context.Context, statePath string, state State, receipt Receip
 	}
 	progress(observer, StageSwitch, 5, "atomically switching application binary")
 	if err := options.InstallBinary(state.StagedBinary, state.BinaryPath); err != nil {
+		appendDiagnosticFailure(state.DiagnosticPath, "switch", err)
 		return rollback(err)
 	}
 	state.Phase = PhaseSwitched
@@ -407,6 +408,12 @@ func Rollback(ctx context.Context, options Options, observer Observer) (Result, 
 	if err := validateInstalledIdentity(options, receipt); err != nil {
 		return Result{}, updateFailure("validate rollback binary", state.DiagnosticPath, err)
 	}
+	if options.GOOS == "windows" && !options.ForceDirect {
+		if err := options.ScheduleRollback(statePath, state.DataDir, state.BinaryPath, state.ReceiptPath); err != nil {
+			return Result{}, updateFailure("schedule Windows rollback helper", state.DiagnosticPath, err)
+		}
+		return Result{CurrentVersion: state.ToVersion, AvailableVersion: state.FromVersion, Scheduled: true, BackupDirectory: state.BackupDirectory, DiagnosticPath: state.DiagnosticPath}, nil
+	}
 	guard, err := db.AcquireMaintenance(ctx, state.DataDir)
 	if err != nil {
 		return Result{}, updateFailure("acquire rollback lock", state.DiagnosticPath, err)
@@ -529,6 +536,9 @@ func fillOptions(options Options) (Options, error) {
 	if options.ScheduleHelper == nil {
 		options.ScheduleHelper = scheduleHelper
 	}
+	if options.ScheduleRollback == nil {
+		options.ScheduleRollback = scheduleRollbackHelper
+	}
 	if options.LocalVerifierPath != "" {
 		options.LocalVerifierPath, err = filepath.Abs(options.LocalVerifierPath)
 		if err != nil || !hashPattern.MatchString(options.LocalVerifierSHA256) || !pathWithin(filepath.Clean(os.TempDir()), options.LocalVerifierPath) {
@@ -625,6 +635,24 @@ func appendDiagnostic(path, stage string, result CommandResult) {
 	_, _ = file.Write(result.Stdout)
 	_, _ = file.Write(result.Stderr)
 	_, _ = file.WriteString("\n")
+}
+
+func appendDiagnosticFailure(path, stage string, err error) {
+	if path == "" || err == nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(path), 0o700)
+	file, openErr := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if openErr != nil {
+		return
+	}
+	defer file.Close()
+	message := strings.ReplaceAll(err.Error(), "\r", " ")
+	message = strings.ReplaceAll(message, "\n", " ")
+	if len(message) > 2048 {
+		message = message[:2048]
+	}
+	_, _ = fmt.Fprintf(file, "[%s] %s\n", stage, message)
 }
 
 func progress(observer Observer, stage Stage, current int, message string) {

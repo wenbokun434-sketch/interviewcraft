@@ -62,6 +62,12 @@ Model Providers receive the minimum typed context required for their role, but t
 
 InterviewCraft is a practice tool. It is not designed for covert live-interview assistance, employment decisions, personality assessment, or safety-critical evaluation.
 
+## Deployment fixture boundary
+
+Deployment acceptance never relaxes production verification. Its release and Provider server binds only to `127.0.0.1`, and its deterministic Cosign stand-in is accepted only when the explicit installer/updater test-mode variables are set. The executable must live below the operating-system temporary directory and match the SHA-256 supplied by the test harness. The fixture package is not included in GoReleaser archives.
+
+The process E2E first proves an invalid bundle cannot change the installed version or user data, then restores the fixture bundle and exercises the normal updater. Production installers and updaters continue to require Cosign v3.1.3, the exact tagged release workflow identity, the GitHub Actions OIDC issuer, strict manifest parsing, archive hash/size, embedded version, and safe extraction. CI evidence contains no Provider key, credential, resume, database, or machine-specific data directory.
+
 ## Reporting a vulnerability
 
 Do not publish an exploit, resume sample, secret, hidden test, or container-escape detail in a public issue. Use the repository host's private security advisory channel and include the affected commit, platform, Runner mode, minimal reproduction, and impact. If no private channel is available, contact the maintainers before disclosing technical details publicly.

@@ -87,7 +87,7 @@ try {
     $ldflags = "-X github.com/interviewcraft/interviewcraft/internal/version.ApplicationVersion=${version} " +
         "-X github.com/interviewcraft/interviewcraft/internal/version.GitCommit=${commit} " +
         "-X github.com/interviewcraft/interviewcraft/internal/version.BuildTime=${createdUTC}"
-    Invoke-Native -FilePath $GoBinary -Arguments @("build", "-trimpath", "-ldflags", $ldflags, "-o", $binary, "./cmd/interviewcraft")
+    Invoke-Native -FilePath $GoBinary -Arguments @("build", "-buildvcs=false", "-trimpath", "-ldflags", $ldflags, "-o", $binary, "./cmd/interviewcraft")
     $versionJSON = (& $binary version --json) -join "`n"
     if ($LASTEXITCODE -ne 0) {
         throw "version fixture failed"

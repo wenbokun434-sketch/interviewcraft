@@ -313,6 +313,30 @@ func TestWindowsScheduledFinalize(t *testing.T) {
 	}
 }
 
+func TestWindowsScheduledRollback(t *testing.T) {
+	fixture := newUpdateFixture(t)
+	if _, err := Run(context.Background(), Request{}, fixture.options, nil); err != nil {
+		t.Fatal(err)
+	}
+	fixture.options.Current.Version = testToVersion
+	fixture.options.ForceDirect = false
+	scheduled := false
+	fixture.options.ScheduleRollback = func(statePath, dataDir, binaryPath, receiptPath string) error {
+		scheduled = statePath == statePathFor(fixture.dataDir) && dataDir == fixture.dataDir && binaryPath == fixture.binary && receiptPath == fixture.receipt
+		return nil
+	}
+	result, err := Rollback(context.Background(), fixture.options, nil)
+	if err != nil || !result.Scheduled || !scheduled || fixture.read(t, fixture.binary) != "new-binary" {
+		t.Fatalf("scheduled rollback = %+v, scheduled=%v, err=%v", result, scheduled, err)
+	}
+	fixture.options.ForceDirect = true
+	fixture.commands.migrateValue = ""
+	result, err = Rollback(context.Background(), fixture.options, nil)
+	if err != nil || !result.RolledBack || fixture.read(t, fixture.binary) != "old-binary" {
+		t.Fatalf("helper rollback = %+v, err=%v", result, err)
+	}
+}
+
 func TestRollbackRejectsCorruptedBackupAndPreservesCurrent(t *testing.T) {
 	fixture := newUpdateFixture(t)
 	result, err := Run(context.Background(), Request{}, fixture.options, nil)

@@ -118,6 +118,8 @@ func RunWithIO(args []string, terminal TerminalIO) int {
 			return runUpdateDoctor(args[1:], stdout, stderr)
 		case "__update-helper":
 			return runUpdateHelper(args[1:], stdout, stderr)
+		case "__rollback-helper":
+			return runRollbackHelper(args[1:], stdout, stderr)
 		case "__uninstall-helper":
 			return runUninstallHelper(args[1:], stdout, stderr)
 		default:
@@ -352,6 +354,10 @@ func runRollback(stdout, stderr io.Writer) int {
 		return ExitFailure
 	}
 	if !result.RolledBack {
+		if result.Scheduled {
+			fmt.Fprintf(stdout, "Rollback to %s is prepared; the Windows replacement helper will finish after this process exits.\n", result.AvailableVersion)
+			return ExitOK
+		}
 		fmt.Fprintln(stdout, "No committed rollback point is available; the current installation was not changed.")
 		return ExitOK
 	}
@@ -505,6 +511,42 @@ func runUninstallHelper(args []string, stdout, stderr io.Writer) int {
 		return ExitFailure
 	}
 	writeUninstallResult(stdout, result)
+	return ExitOK
+}
+
+func runRollbackHelper(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("__rollback-helper", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	statePath := flags.String("state", "", "committed update state")
+	dataDir := flags.String("data-dir", "", "guarded data directory")
+	binaryPath := flags.String("binary", "", "receipt-owned binary")
+	receiptPath := flags.String("receipt", "", "install receipt")
+	parentValue := flags.String("parent", "", "parent PID")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *statePath == "" || *dataDir == "" || *binaryPath == "" || *receiptPath == "" {
+		fmt.Fprintln(stderr, "! Invalid rollback helper request.")
+		return ExitUsage
+	}
+	parent, err := strconv.Atoi(*parentValue)
+	if err != nil || parent <= 0 {
+		fmt.Fprintln(stderr, "! Invalid rollback helper parent process.")
+		return ExitUsage
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := updateservice.WaitForParent(ctx, parent); err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
+	result, err := updateservice.Rollback(ctx, updateservice.Options{
+		Current: buildversion.Current(), DataDir: *dataDir, ReceiptPath: *receiptPath, ExecutablePath: *binaryPath, ForceDirect: true,
+	}, nil)
+	if err == nil && !result.RolledBack {
+		err = errors.New("rollback helper found no committed rollback point")
+	}
+	if err != nil {
+		writeCommandError(stderr, err)
+		return ExitFailure
+	}
 	return ExitOK
 }
 
