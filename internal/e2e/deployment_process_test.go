@@ -105,6 +105,12 @@ func runDeploymentTier(t *testing.T, repo, root, baseURL, verifier, verifierHash
 	}
 	environment := map[string]string{
 		"HOME": home, "USERPROFILE": home, "INTERVIEWCRAFT_DATA_DIR": dataDir,
+		// Keep every test-only verifier and installer workspace under one explicit
+		// canonical temp root. Windows hosted runners may otherwise report the
+		// same user temp directory through both short and long path forms, while
+		// macOS shells may not inherit the directory selected by Go's testing
+		// package. Both cases must remain inside the fixture-only trust boundary.
+		"TEMP": root, "TMP": root, "TMPDIR": root,
 		"INTERVIEWCRAFT_INSTALL_RECEIPT":               receiptPath,
 		"INTERVIEWCRAFT_INSTALL_TEST_RECEIPT":          receiptPath,
 		"INTERVIEWCRAFT_INSTALL_TEST_PATH_FILE":        filepath.Join(home, "managed-user-path.txt"),

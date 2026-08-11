@@ -402,6 +402,19 @@
   - 干净环境矩阵、四态故障矩阵、安装幂等、完整训练、升级回滚、卸载保留数据、Runner 零残留、供应链篡改拒绝、六目标构建、全部单元/模块/E2E/安全门禁通过；README 的复制粘贴命令由 CI 实际执行，执行记录写入平台、版本、耗时和提交 SHA。
 - 完成后提交：`chore(deployment): T-029 certify one-click full deployment`
 
+### [ ] T-030 首个可信公开 Release、本机安装与安装后启动
+
+- 修改目标：发布首个通过完整供应链门禁的公开版本，使一键安装器能够从 GitHub Release 安装正式二进制，并验证配置完成后可在新终端通过 `interviewcraft run` 启动。
+- 允许修改的范围：`scripts/runner-manifest.ps1`、Runner/Release 定向测试、`scripts/test-runner-isolation.ps1`、`internal/e2e/` 部署夹具的跨平台临时目录适配、`README.md` 安装后启动说明、`TODO.md` 当前任务状态与记录，以及本任务所需的 Git 标签、GitHub Actions、GHCR 和 Release 元数据。
+- 不允许破坏的逻辑：不得跳过或降低完整质量门、Sigstore 身份/OIDC、manifest/hash/size、Draft 回读和 Runner 隔离验证；不得移动或强制覆盖已经推送的标签；不得请求管理员权限、把 Docker 变成 Lite 前置或在非交互终端强制启动 TUI；发布/安装失败不得留下伪公开 Release、半安装二进制、错误 PATH、明文密钥或删除用户数据。
+- 验收的标准：
+  - 主流程：新版本标签触发完整 release workflow，六平台归档、双架构 Runner、SBOM、来源证明、严格清单和 Sigstore bundle 全部回读通过后公开；Windows 本机用一键安装器完成 `setup → doctor`，新进程可发现 `interviewcraft`，`version` 与标签/commit 一致，`run --once` 通过且 README 给出常驻 `run` 启动方法。
+  - 加载中：GitHub 质量门、Runner 构建、签名、Draft 上传、回读和公开阶段均可观测；安装器继续显示七阶段进度，在完成 PATH 与收据前不报告成功。
+  - 空数据：远端没有可安装 Release 或本机没有旧安装/收据时提供明确结果；首装从空目录创建单一二进制、配置和无密钥收据，Lite 无 Docker 时仍可启动。
+  - 接口/依赖报错：PowerShell 7 Tab 解析、Linux 空临时变量、Windows 临时路径规范形式、macOS `TMPDIR`、网络、签名、清单、Runner 或发布回读任一失败都阻止公开或安装，并保留可诊断日志；修复后相关平台门禁可重试通过。
+  - 定向 PowerShell 5.1/7、Go 1.26 模块测试、Windows 干净部署、真实 Runner 零残留和完整发布质量门通过；GitHub CI/部署矩阵与正式 Release workflow 通过后，再执行真实一键安装和启动验证。
+- 完成后提交：`chore(release): T-030 publish and install the first verified release`
+
 ## 3. 执行记录
 
 > 每轮只新增一条记录。只有完成当前任务的全部验收后，才允许将对应任务勾选为 `[x]`。

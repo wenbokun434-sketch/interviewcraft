@@ -72,7 +72,7 @@ try {
     }
 
     if ([string]::IsNullOrWhiteSpace($env:GOCACHE)) {
-        $env:GOCACHE = Join-Path $env:TEMP "interviewcraft-runner-go-cache"
+        $env:GOCACHE = Join-Path ([IO.Path]::GetTempPath()) "interviewcraft-runner-go-cache"
     }
 
     Push-Location "docker/runner/agent"

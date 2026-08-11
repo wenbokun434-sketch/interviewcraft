@@ -31,7 +31,7 @@ function Read-StrictRunnerManifest {
     if (-not $content.EndsWith("`n")) { throw "Runner manifest must end with LF" }
     $lines = @($content.TrimEnd("`r", "`n") -split "`n")
     if ($lines.Count -ne 4 -or $lines[0] -cne $header) { throw "Runner manifest header or row count is invalid" }
-    $meta = @($lines[1].TrimEnd("`r") -split "`t", -1)
+    $meta = @($lines[1].TrimEnd("`r").Split([char]9))
     if ($meta.Count -ne 4 -or $meta[0] -cne "meta" -or $meta[1] -cne $Version -or $meta[2] -cne $Commit) {
         throw "Runner manifest metadata is invalid"
     }
@@ -41,7 +41,7 @@ function Read-StrictRunnerManifest {
     }
     $seen = @{}
     foreach ($line in $lines[2..3]) {
-        $fields = @($line.TrimEnd("`r") -split "`t", -1)
+        $fields = @($line.TrimEnd("`r").Split([char]9))
         if ($fields.Count -ne 7 -or $fields[0] -cne "image" -or $fields[1] -cne "linux" -or
             @("amd64", "arm64") -cnotcontains $fields[2] -or $fields[3] -cne $repository -or
             $fields[4] -cnotmatch $digestPattern -or $fields[5] -cne $protocol -or $fields[6] -cne "65532:65532") {

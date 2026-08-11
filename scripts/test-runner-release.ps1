@@ -11,6 +11,11 @@ $commit = "0123456789abcdef0123456789abcdef01234567"
 $amd64 = "sha256:" + ("a" * 64)
 $arm64 = "sha256:" + ("b" * 64)
 
+$manifestSource = [IO.File]::ReadAllText($manifestScript)
+if ($manifestSource.Contains('-split "`t", -1')) {
+    throw "Runner manifest parser must use cross-platform tab splitting"
+}
+
 function Expect-Failure {
     param([Parameter(Mandatory = $true)][scriptblock]$Action)
     $failed = $false
