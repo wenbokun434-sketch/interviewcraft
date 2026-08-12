@@ -27,6 +27,19 @@ func TestResolvedPathWithinUsesExistingDirectoryIdentity(t *testing.T) {
 	}
 }
 
+func TestSameExistingPathRequiresTheSameExistingObject(t *testing.T) {
+	left := t.TempDir()
+	if !sameExistingPath(left, filepath.Clean(left)) {
+		t.Fatal("same directory was rejected")
+	}
+	if sameExistingPath(left, t.TempDir()) {
+		t.Fatal("different directory was accepted")
+	}
+	if sameExistingPath(left, filepath.Join(left, "missing")) {
+		t.Fatal("missing directory was accepted")
+	}
+}
+
 func TestResolvedPathWithinRejectsSymlinkEscape(t *testing.T) {
 	root := t.TempDir()
 	outsideRoot := t.TempDir()

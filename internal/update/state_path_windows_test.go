@@ -36,4 +36,7 @@ func TestResolvedPathWithinAcceptsWindowsShortPathAlias(t *testing.T) {
 	if !resolvedPathWithin(root, shortVerifier) {
 		t.Fatalf("short path alias was rejected: %s", shortVerifier)
 	}
+	if !sameExistingPath(verifier, shortVerifier) {
+		t.Fatalf("short path alias did not identify the same file: %s", shortVerifier)
+	}
 }

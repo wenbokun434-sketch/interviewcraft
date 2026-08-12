@@ -597,7 +597,7 @@ func validateInstalledIdentity(options Options, receipt Receipt) error {
 	if !os.SameFile(left, right) {
 		return errors.New("update must run from the receipt-owned binary")
 	}
-	if receipt.DataDir != "" && filepath.Clean(receipt.DataDir) != filepath.Clean(options.DataDir) {
+	if receipt.DataDir != "" && !sameExistingPath(receipt.DataDir, options.DataDir) {
 		return errors.New("install receipt data directory does not match the active configuration")
 	}
 	return nil

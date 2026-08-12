@@ -101,3 +101,12 @@ func pathWithin(root, target string) bool {
 	relative, err := filepath.Rel(root, target)
 	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }
+
+func sameExistingPath(left, right string) bool {
+	leftInfo, err := os.Stat(left)
+	if err != nil {
+		return false
+	}
+	rightInfo, err := os.Stat(right)
+	return err == nil && os.SameFile(leftInfo, rightInfo)
+}
