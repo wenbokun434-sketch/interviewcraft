@@ -541,7 +541,7 @@ func fillOptions(options Options) (Options, error) {
 	}
 	if options.LocalVerifierPath != "" {
 		options.LocalVerifierPath, err = filepath.Abs(options.LocalVerifierPath)
-		if err != nil || !hashPattern.MatchString(options.LocalVerifierSHA256) || !pathWithin(filepath.Clean(os.TempDir()), options.LocalVerifierPath) {
+		if err != nil || !hashPattern.MatchString(options.LocalVerifierSHA256) || !resolvedPathWithin(filepath.Clean(os.TempDir()), options.LocalVerifierPath) {
 			return options, errors.New("local update verifier fixture is invalid")
 		}
 	}

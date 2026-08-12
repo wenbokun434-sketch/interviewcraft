@@ -405,7 +405,7 @@
 ### [ ] T-030 首个可信公开 Release、本机安装与安装后启动
 
 - 修改目标：发布首个通过完整供应链门禁的公开版本，使一键安装器能够从 GitHub Release 安装正式二进制，并验证配置完成后可在新终端通过 `interviewcraft run` 启动。
-- 允许修改的范围：`scripts/runner-manifest.ps1`、Runner/Release 定向测试、`scripts/test-runner-isolation.ps1`、`internal/e2e/` 部署夹具的跨平台临时目录适配、`README.md` 安装后启动说明、`TODO.md` 当前任务状态与记录，以及本任务所需的 Git 标签、GitHub Actions、GHCR 和 Release 元数据。
+- 允许修改的范围：`scripts/runner-manifest.ps1`、Runner/Release 定向测试、`scripts/test-runner-isolation.ps1`、`internal/e2e/` 部署夹具的跨平台临时目录适配、`internal/update/` 中现存测试校验器的规范路径边界判断、`README.md` 安装后启动说明、`TODO.md` 当前任务状态与记录，以及本任务所需的 Git 标签、GitHub Actions、GHCR 和 Release 元数据。
 - 不允许破坏的逻辑：不得跳过或降低完整质量门、Sigstore 身份/OIDC、manifest/hash/size、Draft 回读和 Runner 隔离验证；不得移动或强制覆盖已经推送的标签；不得请求管理员权限、把 Docker 变成 Lite 前置或在非交互终端强制启动 TUI；发布/安装失败不得留下伪公开 Release、半安装二进制、错误 PATH、明文密钥或删除用户数据。
 - 验收的标准：
   - 主流程：新版本标签触发完整 release workflow，六平台归档、双架构 Runner、SBOM、来源证明、严格清单和 Sigstore bundle 全部回读通过后公开；Windows 本机用一键安装器完成 `setup → doctor`，新进程可发现 `interviewcraft`，`version` 与标签/commit 一致，`run --once` 通过且 README 给出常驻 `run` 启动方法。
