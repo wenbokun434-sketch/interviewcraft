@@ -93,9 +93,16 @@ try {
         throw "version fixture failed"
     }
     $info = $versionJSON | ConvertFrom-Json
+    $infoBuildTime = $info.build_time
+    if ($infoBuildTime -is [datetime]) {
+        $infoBuildTime = $infoBuildTime.ToString("yyyy-MM-ddTHH:mm:ssZ", [Globalization.CultureInfo]::InvariantCulture)
+    }
+    else {
+        $infoBuildTime = [string]$infoBuildTime
+    }
     if ($info.schema_version -ne "interviewcraft-version-v1" -or
         $info.version -ne $version -or $info.git_commit -ne $commit -or
-        $info.build_time -ne $createdUTC -or
+        $infoBuildTime -ne $createdUTC -or
         [string]::IsNullOrWhiteSpace($info.goos) -or [string]::IsNullOrWhiteSpace($info.goarch)) {
         throw "injected version metadata does not match"
     }
